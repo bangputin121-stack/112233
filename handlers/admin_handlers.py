@@ -830,3 +830,252 @@ async def setchannel_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"Error: `{e}`",
             parse_mode=ParseMode.MARKDOWN
         )
+
+
+# ─── ADMIN: TOKO PERMATA & EVENT CODE ───────────────────────────────────────
+
+@admin_only
+async def givegems_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Cara pakai: `/givegems <user_id> <jumlah>`\n"
+            "Contoh: `/givegems 123456789 10`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    try:
+        target_id = int(args[0])
+        amount = int(args[1])
+    except ValueError:
+        await update.message.reply_text("❌ user_id & jumlah harus angka.")
+        return
+    from game.gems import give_gems
+    ok = await give_gems(target_id, amount)
+    if ok:
+        await log_admin_action(update.effective_user.id, "give_gems", target_id, str(amount))
+        await update.message.reply_text(f"✅ Sukses kasih **{amount}💎** ke user `{target_id}`",
+                                        parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(f"❌ User `{target_id}` tidak ditemukan.",
+                                        parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def addgemitem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Format: /addgemitem <harga> <type> <value> <emoji> | <nama> | <deskripsi>
+    
+    Type:
+      coins  → value = jumlah Rp           (contoh: 100000)
+      item   → value = item_key:qty        (contoh: wheat:50)
+      custom → value = label apa aja, admin proses manual
+    
+    Contoh:
+      /addgemitem 50 coins 100000 💰 | Bonus Rp100rb | Tambahan saldo instant
+      /addgemitem 30 item wheat:50 🌾 | Paket Wheat 50 | 50 biji wheat instant
+      /addgemitem 100 custom skin_emas 👑 | Skin Petani Emas | Skin eksklusif (manual)
+    """
+    raw = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "**Cara pakai:**\n"
+            "`/addgemitem <harga> <type> <value> <emoji> | <nama> | <deskripsi>`\n\n"
+            "**Type tersedia:**\n"
+            "• `coins` — value = jumlah Rp (cth: `100000`)\n"
+            "• `item` — value = `item_key:qty` (cth: `wheat:50`)\n"
+            "• `custom` — value = label, admin proses manual\n\n"
+            "**Contoh:**\n"
+            "`/addgemitem 50 coins 100000 💰 | Bonus 100rb | Saldo Rp100.000`\n"
+            "`/addgemitem 30 item wheat:50 🌾 | Paket Wheat | 50 biji wheat`\n"
+            "`/addgemitem 100 custom skin_emas 👑 | Skin Emas | Diproses manual`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    body = parts[1]
+    pipe_parts = [p.strip() for p in body.split("|")]
+    if len(pipe_parts) < 2:
+        await update.message.reply_text("❌ Format salah. Pakai `|` buat pisah header dari nama/deskripsi.",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+
+    head = pipe_parts[0].split()
+    if len(head) < 4:
+        await update.message.reply_text("❌ Header butuh: `<harga> <type> <value> <emoji>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+
+    try:
+        price = int(head[0])
+    except ValueError:
+        await update.message.reply_text("❌ Harga harus angka.")
+        return
+    rtype = head[1].lower()
+    if rtype not in ("coins", "item", "custom"):
+        await update.message.reply_text("❌ Type harus: `coins`, `item`, atau `custom`.",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    rvalue = head[2]
+    emoji = head[3]
+    name = pipe_parts[1]
+    description = pipe_parts[2] if len(pipe_parts) > 2 else ""
+
+    try:
+        from game.gems import add_gem_item
+        item_id = await add_gem_item(name, price, rtype, rvalue, emoji, description)
+        await log_admin_action(update.effective_user.id, "add_gem_item",
+                               details=f"id={item_id} {name}")
+        await update.message.reply_text(
+            f"✅ **Item ditambahkan!**\n\n"
+            f"ID: `{item_id}`\n"
+            f"{emoji} **{name}** — {price}💎\n"
+            f"Type: `{rtype}` → `{rvalue}`\n"
+            f"Deskripsi: _{description or '-'}_\n\n"
+            f"Cek dengan `/listgemitems`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+@admin_only
+async def delgemitem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/delgemitem <id>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        item_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ ID harus angka.")
+        return
+    from game.gems import delete_gem_item
+    ok = await delete_gem_item(item_id)
+    if ok:
+        await log_admin_action(update.effective_user.id, "del_gem_item", details=str(item_id))
+        await update.message.reply_text(f"✅ Item ID `{item_id}` dihapus.",
+                                        parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(f"❌ Item ID `{item_id}` tidak ditemukan.",
+                                        parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def togglegemitem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/togglegemitem <id>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        item_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ ID harus angka.")
+        return
+    from game.gems import toggle_gem_item
+    ok, state = await toggle_gem_item(item_id)
+    if ok:
+        await update.message.reply_text(
+            f"✅ Item ID `{item_id}` sekarang **{'AKTIF ✅' if state else 'NONAKTIF ❌'}**",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(f"❌ Item ID `{item_id}` tidak ditemukan.",
+                                        parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def listgemitems_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from game.gems import list_gem_items
+    items = await list_gem_items(active_only=False)
+    if not items:
+        await update.message.reply_text("📭 Belum ada item di toko permata.\n\nTambahin pake `/addgemitem`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    lines = ["💎 **DAFTAR ITEM TOKO PERMATA**\n━━━━━━━━━━━━━━━━━━━━\n"]
+    for it in items:
+        status = "✅" if it["active"] else "❌"
+        stock = "∞" if it["stock"] < 0 else str(it["stock"])
+        lines.append(
+            f"{status} `[{it['id']}]` {it['emoji']} **{it['name']}**\n"
+            f"   💎 {it['price_gems']} | Stok: {stock} | Type: `{it['reward_type']}`\n"
+            f"   Value: `{it['reward_value']}`\n"
+        )
+    lines.append(
+        "\n**Command admin:**\n"
+        "`/addgemitem` — tambah item\n"
+        "`/delgemitem <id>` — hapus item\n"
+        "`/togglegemitem <id>` — aktif/nonaktifkan"
+    )
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n_(dipotong)_"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def createcode_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 3:
+        await update.message.reply_text(
+            "**Cara pakai:**\n"
+            "`/createcode <KODE> <jumlah_gems> <max_klaim>`\n\n"
+            "**Contoh:**\n"
+            "`/createcode EVENT2026 10 100`\n"
+            "→ Code `EVENT2026` kasih 10💎, max 100 user yang bisa klaim",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    code = args[0]
+    try:
+        gems = int(args[1])
+        max_uses = int(args[2])
+    except ValueError:
+        await update.message.reply_text("❌ Jumlah gems & max klaim harus angka.")
+        return
+
+    from game.gems import create_redeem_code
+    ok, msg = await create_redeem_code(code, gems, max_uses, update.effective_user.id)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    if ok:
+        await log_admin_action(update.effective_user.id, "create_code",
+                               details=f"{code}:{gems}x{max_uses}")
+
+
+@admin_only
+async def delcode_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/delcode <KODE>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    from game.gems import delete_redeem_code
+    ok = await delete_redeem_code(args[0])
+    if ok:
+        await update.message.reply_text(f"✅ Code `{args[0].upper()}` dihapus.",
+                                        parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(f"❌ Code tidak ditemukan.")
+
+
+@admin_only
+async def listcodes_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from game.gems import list_redeem_codes
+    codes = await list_redeem_codes()
+    if not codes:
+        await update.message.reply_text("📭 Belum ada redeem code.\n\nBuat pake `/createcode`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    lines = ["🎟 **REDEEM CODES AKTIF**\n━━━━━━━━━━━━━━━━━━━━\n"]
+    for c in codes:
+        full = "🔴 PENUH" if c["uses"] >= c["max_uses"] else "🟢 AKTIF"
+        lines.append(
+            f"{full} `{c['code']}`\n"
+            f"   💎 {c['reward_gems']} per klaim\n"
+            f"   📊 {c['uses']}/{c['max_uses']} klaim\n"
+        )
+    lines.append("\n**Command:**\n`/createcode <kode> <gems> <max>`\n`/delcode <kode>`")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
