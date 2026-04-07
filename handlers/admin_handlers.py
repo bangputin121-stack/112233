@@ -1,0 +1,832 @@
+# handlers/admin_handlers.py - Admin panel for Harvest Kingdom
+
+import os
+import json
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
+
+from database.db import (
+    get_db, fetchone, fetchall, get_user, update_user, parse_json_field,
+    dump_json_field, log_admin_action, get_setting, set_setting
+)
+from game.engine import (
+    add_to_inventory, remove_from_inventory, get_user_full,
+    get_item_count
+)
+from game.data import (
+    CROPS, ANIMALS, BUILDINGS, UPGRADE_TOOLS, EXPANSION_TOOLS,
+    CLEARING_TOOLS, get_item_emoji, get_item_name
+)
+
+logger = logging.getLogger(__name__)
+
+def get_admin_ids() -> list[int]:
+    raw = os.getenv("ADMIN_IDS", "")
+    return [int(x.strip()) for x in raw.split(",") if x.strip().isdigit()]
+
+def is_admin(user_id: int) -> bool:
+    return user_id in get_admin_ids()
+
+def admin_only(func):
+    async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        if not is_admin(user.id):
+            if update.message:
+                await update.message.reply_text("🚫 Khusus admin.")
+            elif update.callback_query:
+                await update.callback_query.answer("🚫 Khusus admin.", show_alert=True)
+            return
+        return await func(update, ctx)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
+def admin_main_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👥 Kelola Pengguna", callback_data="adm_users"),
+            InlineKeyboardButton("💵 Beri Item", callback_data="adm_give"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Pengaturan Game", callback_data="adm_settings"),
+            InlineKeyboardButton("📊 Statistik", callback_data="adm_stats"),
+        ],
+        [
+            InlineKeyboardButton("📢 Siaran", callback_data="adm_broadcast"),
+            InlineKeyboardButton("🗃️ Log Admin", callback_data="adm_logs"),
+        ],
+        [
+            InlineKeyboardButton("🌾 Kelola Database Item", callback_data="adm_items"),
+            InlineKeyboardButton("🏠 Tutup", callback_data="menu"),
+        ],
+    ])
+
+def admin_settings_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔧 Aktif/Nonaktif Maintenance", callback_data="adm_set_maintenance")],
+        [InlineKeyboardButton("Event 2x XP", callback_data="adm_set_double_xp")],
+        [InlineKeyboardButton("Event 2x Koin", callback_data="adm_set_double_coins")],
+        [InlineKeyboardButton("✏️ Atur Pesan Sambutan", callback_data="adm_set_welcome")],
+        [InlineKeyboardButton("📈 Atur Drop Rate", callback_data="adm_set_droprate")],
+        [InlineKeyboardButton("🏪 Atur Harga Pasar Maks", callback_data="adm_set_maxprice")],
+        [InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")],
+    ])
+
+
+@admin_only
+async def admin_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👑 **Panel Admin — Harvest Kingdom**\n\nPilih menu:",
+        reply_markup=admin_main_keyboard(),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+@admin_only
+async def adm_panel_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "👑 **Panel Admin — Harvest Kingdom**\n\nPilih menu:",
+        reply_markup=admin_main_keyboard(),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+# ─── STATS ───────────────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_stats_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    async with get_db() as db:
+        total_users = (await fetchone(db, "SELECT COUNT(*) as c FROM users"))["c"]
+        total_harvests_sum = (await fetchone(db, "SELECT SUM(total_harvests) as s FROM users"))["s"] or 0
+        total_sales_sum = (await fetchone(db, "SELECT SUM(total_sales) as s FROM users"))["s"] or 0
+        total_market = (await fetchone(db, "SELECT COUNT(*) as c FROM market_listings"))["c"]
+        max_level_user = await fetchone(db, "SELECT first_name, level, xp FROM users ORDER BY level DESC, xp DESC LIMIT 1")
+        total_coins = (await fetchone(db, "SELECT SUM(coins) as s FROM users"))["s"] or 0
+        active_orders = (await fetchone(db, "SELECT COUNT(*) as c FROM orders WHERE status='active'"))["c"]
+
+    top = f"{max_level_user['first_name']} (Lv {max_level_user['level']})" if max_level_user else "N/A"
+    maintenance = await get_setting("maintenance_mode", "0")
+    double_xp = await get_setting("double_xp", "0")
+    double_koin = await get_setting("double_coins", "0")
+    drop_rate = await get_setting("bonus_drop_rate", "0.05")
+
+    text = (
+        f"📊 **Statistik Game**\n\n"
+        f"👥 Total pemain: **{total_users}**\n"
+        f"🌾 Total panen: **{total_harvests_sum:,}**\n"
+        f"🚚 Total penjualan: **{total_sales_sum:,}**\n"
+        f"🏪 Listing pasar: **{total_market}**\n"
+        f"📋 Pesanan aktif: **{active_orders}**\n"
+        f"💵 Total uang dalam game: **Rp{total_coins:,}**\n"
+        f"🏆 Pemain teratas: **{top}**\n\n"
+        f"**Event Aktif:**\n"
+        f"🔧 Maintenance: {'ON' if maintenance=='1' else 'OFF'}\n"
+        f"⭐ Double XP: {'ON' if double_xp=='1' else 'OFF'}\n"
+        f"💵 Double Rp: {'ON' if double_koin=='1' else 'OFF'}\n"
+        f"🎁 Drop Rate: {float(drop_rate)*100:.1f}%"
+    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[
+        InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")
+    ]]), parse_mode=ParseMode.MARKDOWN)
+
+
+# ─── SETTINGS ────────────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_settings_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    maintenance = await get_setting("maintenance_mode", "0")
+    double_xp = await get_setting("double_xp", "0")
+    double_koin = await get_setting("double_coins", "0")
+    drop_rate = await get_setting("bonus_drop_rate", "0.05")
+
+    text = (
+        f"⚙️ **Pengaturan Game**\n\n"
+        f"🔧 Maintenance: {'🟢 ON' if maintenance=='1' else '🔴 OFF'}\n"
+        f"⭐ Double XP: {'🟢 ON' if double_xp=='1' else '🔴 OFF'}\n"
+        f"💵 Double Rp: {'🟢 ON' if double_koin=='1' else '🔴 OFF'}\n"
+        f"🎁 Drop Rate: {float(drop_rate)*100:.1f}%\n"
+    )
+    await query.edit_message_text(text, reply_markup=admin_settings_keyboard(), parse_mode=ParseMode.MARKDOWN)
+
+@admin_only
+async def adm_toggle_setting(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    action = query.data
+
+    if action == "adm_set_maintenance":
+        cur = await get_setting("maintenance_mode", "0")
+        new = "0" if cur == "1" else "1"
+        await set_setting("maintenance_mode", new)
+        status = "diaktifkan" if new == "1" else "dinonaktifkan"
+        await query.answer(f"Maintenance {status}!", show_alert=True)
+
+    elif action == "adm_set_double_xp":
+        cur = await get_setting("double_xp", "0")
+        new = "0" if cur == "1" else "1"
+        await set_setting("double_xp", new)
+        await query.answer(f"2x XP {'ON' if new=='1' else 'OFF'}!", show_alert=True)
+
+    elif action == "adm_set_double_coins":
+        cur = await get_setting("double_coins", "0")
+        new = "0" if cur == "1" else "1"
+        await set_setting("double_coins", new)
+        await query.answer(f"2x Coins {'ON' if new=='1' else 'OFF'}!", show_alert=True)
+
+    elif action == "adm_set_welcome":
+        ctx.user_data["adm_action"] = "set_welcome"
+        await query.edit_message_text(
+            "✏️ Kirim teks pesan sambutan baru:\n(Kirim /cancel untuk batal)",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_settings")]]),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    elif action == "adm_set_droprate":
+        ctx.user_data["adm_action"] = "set_droprate"
+        cur = await get_setting("bonus_drop_rate", "0.05")
+        await query.edit_message_text(
+            f"📈 Drop rate saat ini: {float(cur)*100:.1f}%\n\nKirim rate baru dalam desimal (e.g. 0.05 = 5%):",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_settings")]]),
+        )
+        return
+
+    elif action == "adm_set_maxprice":
+        ctx.user_data["adm_action"] = "set_maxprice"
+        cur = await get_setting("max_market_price", "9999")
+        await query.edit_message_text(
+            f"🏪 Harga maks saat ini: Rp{cur}\n\nKirim harga maks baru:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_settings")]]),
+        )
+        return
+
+    # Refresh settings page
+    await adm_settings_callback(update, ctx)
+
+@admin_only
+async def adm_text_input(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    action = ctx.user_data.get("adm_action")
+    if not action:
+        return
+    text = update.message.text.strip()
+
+    if action == "set_welcome":
+        await set_setting("welcome_message", text)
+        await update.message.reply_text(f"✅ Pesan sambutan diperbarui!")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "set_droprate":
+        try:
+            rate = float(text)
+            if not 0 <= rate <= 1:
+                raise ValueError
+            await set_setting("bonus_drop_rate", str(rate))
+            await update.message.reply_text(f"✅ Drop rate set ke {rate*100:.1f}%")
+        except ValueError:
+            await update.message.reply_text("❌ Invalid. Send a decimal 0.0 ke 1.0")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "set_maxprice":
+        try:
+            price = int(text)
+            await set_setting("max_market_price", str(price))
+            await update.message.reply_text(f"✅ Max market price set ke Rp{price:,}")
+        except ValueError:
+            await update.message.reply_text("❌ Angka tidak valid.")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "give_item_qty":
+        try:
+            parts = text.split()
+            target_id = int(ctx.user_data.get("adm_target_id"))
+            item_key = ctx.user_data.get("adm_give_item")
+            qty = int(parts[0])
+            ok, msg = await add_to_inventory(target_id, item_key, qty)
+            if ok:
+                await log_admin_action(update.effective_user.id, "give_item", target_id, f"{item_key} x{qty}")
+                await update.message.reply_text(f"✅ Memberi {qty}x {get_item_name(item_key)} ke user {target_id}")
+            else:
+                await update.message.reply_text(f"❌ Gagal: {msg}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "set_coins":
+        try:
+            amount = int(text)
+            target_id = int(ctx.user_data.get("adm_target_id"))
+            await update_user(target_id, coins=amount)
+            await log_admin_action(update.effective_user.id, "set_coins", target_id, str(amount))
+            await update.message.reply_text(f"✅ Set Rp ke {amount:,} untuk user {target_id}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "set_level":
+        try:
+            level = int(text)
+            target_id = int(ctx.user_data.get("adm_target_id"))
+            from game.data import LEVEL_THRESHOLDS
+            xp = LEVEL_THRESHOLDS[min(level-1, len(LEVEL_THRESHOLDS)-1)]
+            await update_user(target_id, level=level, xp=xp)
+            await log_admin_action(update.effective_user.id, "set_level", target_id, str(level))
+            await update.message.reply_text(f"✅ Set level ke {level} untuk user {target_id}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "set_gems":
+        try:
+            gems = int(text)
+            target_id = int(ctx.user_data.get("adm_target_id"))
+            await update_user(target_id, gems=gems)
+            await log_admin_action(update.effective_user.id, "set_gems", target_id, str(gems))
+            await update.message.reply_text(f"✅ Set gems ke {gems} untuk user {target_id}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "broadcast_msg":
+        msg_text = text
+        async with get_db() as db:
+            rows = await fetchall(db, "SELECT user_id FROM users")
+            user_ids = [r["user_id"] for r in rows]
+
+        sent = 0
+        failed = 0
+        for uid in user_ids:
+            try:
+                await ctx.bot.send_message(uid, f"📢 **Admin Announcement**\n\n{msg_text}", parse_mode=ParseMode.MARKDOWN)
+                sent += 1
+            except Exception:
+                failed += 1
+
+        await log_admin_action(update.effective_user.id, "broadcast", None, msg_text[:100])
+        await update.message.reply_text(f"📢 Siaran sent ke {sent} pemain. Gagal: {failed}")
+        ctx.user_data.pop("adm_action", None)
+
+    elif action == "add_item_db":
+        # Format: key,name,emoji,grow_time,sell_price,xp,level_req,seed_cost
+        try:
+            parts = text.split(",")
+            if len(parts) != 8:
+                raise ValueError("Butuh 8 nilai dipisah koma")
+            key, name, emoji, grow_time, sell_price, xp, level_req, seed_cost = [p.strip() for p in parts]
+            CROPS[key] = {
+                "name": name, "emoji": emoji,
+                "grow_time": int(grow_time), "sell_price": int(sell_price),
+                "xp": int(xp), "level_req": int(level_req), "seed_cost": int(seed_cost)
+            }
+            await update.message.reply_text(f"✅ Tanaman ditambahkan: {emoji} {name} ke database (runtime saja - tambahkan ke data.py untuk permanen)")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Format: key,name,emoji,grow_time,sell_price,xp,level_req,seed_cost\nError: {e}")
+        ctx.user_data.pop("adm_action", None)
+
+
+# ─── USER MANAGEMENT ─────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_users_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    page = 0
+    # Check if page number in callback data
+    if query.data.startswith("adm_users_page_"):
+        page = int(query.data.split("_")[3])
+    
+    per_page = 10
+    async with get_db() as db:
+        total_row = await fetchone(db, "SELECT COUNT(*) as c FROM users")
+        total = total_row["c"]
+        rows = await fetchall(db, 
+            "SELECT user_id, first_name, display_name, username, level, coins, xp FROM users ORDER BY level DESC, xp DESC LIMIT ? OFFSET ?",
+            (per_page, page * per_page)
+        )
+        users = [dict(r) for r in rows]
+
+    buttons = []
+    for i, u in enumerate(users):
+        rank = page * per_page + i + 1
+        uname = f"@{u['username']}" if u["username"] else f"ID:{u['user_id']}"
+        name = u["display_name"] if u.get("display_name") else u["first_name"]
+        buttons.append([InlineKeyboardButton(
+            f"#{rank} [Lv{u['level']}] {name} {uname} — Rp{u['coins']:,}",
+            callback_data=f"adm_user_{u['user_id']}"
+        )])
+
+    # Pagination
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Prev", callback_data=f"adm_users_page_{page-1}"))
+    if (page + 1) * per_page < total:
+        nav.append(InlineKeyboardButton("▶️ Next", callback_data=f"adm_users_page_{page+1}"))
+    if nav:
+        buttons.append(nav)
+
+    buttons.append([InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")])
+    
+    total_pages = (total + per_page - 1) // per_page
+    await query.edit_message_text(
+        f"👥 **Semua Pemain** ({total} total)\n"
+        f"Halaman {page+1}/{total_pages} — ketuk untuk kelola:",
+        reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN
+    )
+
+@admin_only
+async def adm_user_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    user = await get_user(target_id)
+    if not user:
+        await query.answer("Pengguna tidak ditemukan!", show_alert=True)
+        return
+
+    silo = parse_json_field(user["silo_items"])
+    barn = parse_json_field(user["barn_items"])
+    text = (
+        f"👤 **Pengguna: {user['first_name']}**\n"
+        f"🪪 ID: `{user['user_id']}`\n"
+        f"👑 Level: {user['level']} | XP: {user['xp']}\n"
+        f"💵 Rp{user['coins']:,} | 💎 Permata: {user['gems']}\n"
+        f"🌾 Panen: {user['total_harvests']}\n"
+        f"📦 Gudang: {sum(silo.values())}/{user['silo_cap']}\n"
+        f"🏚 Lumbung: {sum(barn.values())}/{user['barn_cap']}\n"
+    )
+    buttons = [
+        [
+            InlineKeyboardButton("💵 Atur Uang", callback_data=f"adm_setcoins_{target_id}"),
+            InlineKeyboardButton("💎 Atur Permata", callback_data=f"adm_setgems_{target_id}"),
+        ],
+        [
+            InlineKeyboardButton("👑 Atur Level", callback_data=f"adm_setlevel_{target_id}"),
+            InlineKeyboardButton("🎁 Beri Item", callback_data=f"adm_giveitem_{target_id}"),
+        ],
+        [
+            InlineKeyboardButton("🗑️ Reset Pengguna", callback_data=f"adm_resetuser_{target_id}"),
+            InlineKeyboardButton("🚫 Ban/Unban", callback_data="noop"),
+        ],
+        [InlineKeyboardButton("⬅️ Kembali", callback_data="adm_users")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+
+@admin_only
+async def adm_setcoins_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    ctx.user_data["adm_action"] = "set_coins"
+    ctx.user_data["adm_target_id"] = target_id
+    await query.edit_message_text(f"💵 Kirim jumlah Rp baru untuk user {target_id}:")
+
+@admin_only
+async def adm_setlevel_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    ctx.user_data["adm_action"] = "set_level"
+    ctx.user_data["adm_target_id"] = target_id
+    await query.edit_message_text(f"👑 Kirim level baru untuk user {target_id}:")
+
+@admin_only
+async def adm_setgems_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    ctx.user_data["adm_action"] = "set_gems"
+    ctx.user_data["adm_target_id"] = target_id
+    await query.edit_message_text(f"💎 Kirim jumlah permata untuk user {target_id}:")
+
+@admin_only
+async def adm_giveitem_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    ctx.user_data["adm_target_id"] = target_id
+
+    all_keys = (
+        list(CROPS.keys()) + list(UPGRADE_TOOLS.keys()) +
+        list(EXPANSION_TOOLS.keys()) + list(CLEARING_TOOLS.keys())
+    )
+    buttons = []
+    row = []
+    for key in all_keys[:24]:
+        emoji = get_item_emoji(key)
+        row.append(InlineKeyboardButton(f"{emoji}{get_item_name(key)}", callback_data=f"adm_give2_{target_id}_{key}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("⬅️ Batal", callback_data=f"adm_user_{target_id}")])
+    await query.edit_message_text(f"🎁 Beri item ke user {target_id} — pilih item:", reply_markup=InlineKeyboardMarkup(buttons))
+
+@admin_only
+async def adm_give2_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    target_id = int(parts[2])
+    item_key = "_".join(parts[3:])
+    ctx.user_data["adm_action"] = "give_item_qty"
+    ctx.user_data["adm_target_id"] = target_id
+    ctx.user_data["adm_give_item"] = item_key
+    emoji = get_item_emoji(item_key)
+    name = get_item_name(item_key)
+    await query.edit_message_text(f"🎁 Beri {emoji} {name} ke user {target_id}\nKirim jumlah:")
+
+@admin_only
+async def adm_resetuser_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    await update_user(target_id, coins=50000, gems=5, xp=0, level=1,
+                      silo_items="{}", barn_items="{}", land_items="{}")
+    await log_admin_action(query.from_user.id, "reset_user", target_id)
+    await query.answer(f"✅ Pengguna {target_id} direset!", show_alert=True)
+
+
+# ─── BROADCAST ────────────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_broadcast_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ctx.user_data["adm_action"] = "broadcast_msg"
+    await query.edit_message_text(
+        "📢 **Pesan Siaran**\n\nKirim pesan untuk disiarkan ke SEMUA pemain:",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_panel")]]),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+# ─── LOGS ────────────────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_logs_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    async with get_db() as db:
+        rows = await fetchall(db, 
+            "SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT 20"
+        )
+        logs = [dict(r) for r in rows]
+
+    if not logs:
+        text = "📋 Belum ada aksi admin yang tercatat."
+    else:
+        lines = ["📋 **Aksi Admin Terbaru:**\n"]
+        for log in logs:
+            lines.append(f"• [{log['created_at'][:16]}] Admin {log['admin_id']} → {log['action']} on {log['target_id']}: {log['details']}")
+        text = "\n".join(lines)
+
+    await query.edit_message_text(
+        text[:4000],
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")]]),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+# ─── ITEMS DB ─────────────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_items_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lines = ["🌾 **Tanaman di Database:**\n"]
+    for k, v in CROPS.items():
+        lines.append(f"{v['emoji']} {v['name']} (key:`{k}`) Lv{v['level_req']} | {v['grow_time']}s | Rp{v['sell_price']}")
+
+    buttons = [
+        [InlineKeyboardButton("➕ Tambah Tanaman (runtime)", callback_data="adm_addcrop")],
+        [InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")],
+    ]
+    await query.edit_message_text("\n".join(lines)[:4000], reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+
+@admin_only
+async def adm_addcrop_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ctx.user_data["adm_action"] = "add_item_db"
+    await query.edit_message_text(
+        "➕ **Tambah Tanaman (runtime saja)**\n\nKirim dengan format:\n`key,name,emoji,grow_time_secs,sell_price,xp,level_req,seed_cost`\n\nExample:\n`mango,Mango,🥭,7200,200,12,14,160`",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_items")]]),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+# ─── GIVE COMMANDS ────────────────────────────────────────────────────────────
+
+@admin_only
+async def adm_give_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "🎁 **Beri Items ke Player**\n\nGunakan perintah:\n`/give <user_id> <item_key> <qty>`\n\nContoh:\n"
+        "`/give 123456789 wheat 50`\n`/give 123456789 bolt 10`\n`/give 123456789 axe 5`",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")]]),
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+@admin_only
+async def give_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 3:
+        await update.message.reply_text("Cara pakai: `/give <user_id> <item_key> <qty>`", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        target_id = int(args[0])
+        item_key = args[1].lower()
+        qty = int(args[2])
+    except ValueError:
+        await update.message.reply_text("❌ Argumen tidak valid.")
+        return
+
+    user = await get_user(target_id)
+    if not user:
+        await update.message.reply_text(f"❌ Pengguna {target_id} tidak ditemukan.")
+        return
+
+    ok, msg = await add_to_inventory(target_id, item_key, qty)
+    if ok:
+        await log_admin_action(update.effective_user.id, "give_item", target_id, f"{item_key}x{qty}")
+        emoji = get_item_emoji(item_key)
+        await update.message.reply_text(f"✅ Memberi {qty}x {emoji} {get_item_name(item_key)} ke {user['first_name']} (ID:{target_id})")
+        try:
+            await ctx.bot.send_message(target_id, f"🎁 Admin memberimu {qty}x {emoji} {get_item_name(item_key)}!")
+        except Exception:
+            pass
+    else:
+        await update.message.reply_text(f"❌ {msg}")
+
+@admin_only
+async def givecoins_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text("Cara pakai: `/givecoins <user_id> <amount>`", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        target_id = int(args[0])
+        amount = int(args[1])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid.")
+        return
+
+    user = await get_user(target_id)
+    if not user:
+        await update.message.reply_text(f"❌ Pengguna tidak ditemukan.")
+        return
+
+    await update_user(target_id, coins=user["coins"] + amount)
+    await log_admin_action(update.effective_user.id, "give_coins", target_id, str(amount))
+    await update.message.reply_text(f"✅ Memberi Rp{amount:,} ke {user['first_name']}.")
+    try:
+        await ctx.bot.send_message(target_id, f"🎁 Admin memberimu Rp{amount:,}!")
+    except Exception:
+        pass
+
+# ─── SET PHOTO (Admin: reply foto + /setphoto item_key) ─────────────────────
+
+@admin_only
+async def setphoto_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin replies to a photo with /setphoto <item_key> to set item emoji/photo."""
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "📸 **Set Foto Item**\n\n"
+            "Cara pakai: Reply foto dengan:\n"
+            "`/setphoto <item_key>`\n\n"
+            "Contoh: `/setphoto wheat`\n\n"
+            "Item keys yang tersedia:\n"
+            + ", ".join(f"`{k}`" for k in list(CROPS.keys())[:10]) + "...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    item_key = args[0].lower()
+
+    # Validate item exists
+    all_keys = (
+        list(CROPS.keys()) + list(UPGRADE_TOOLS.keys()) +
+        list(EXPANSION_TOOLS.keys()) + list(CLEARING_TOOLS.keys())
+    )
+    for bld in BUILDINGS.values():
+        all_keys.extend(bld["recipes"].keys())
+
+    if item_key not in all_keys:
+        await update.message.reply_text(f"❌ Item `{item_key}` tidak ditemukan.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # Check if reply to photo
+    reply = update.message.reply_to_message
+    if not reply or not reply.photo:
+        await update.message.reply_text("❌ Reply ke sebuah foto lalu ketik `/setphoto {item_key}`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # Get photo file_id (largest size)
+    photo = reply.photo[-1]
+    file_id = photo.file_id
+
+    # Store in game_settings as photo_<item_key>
+    await set_setting(f"photo_{item_key}", file_id)
+    await log_admin_action(update.effective_user.id, "set_photo", details=f"{item_key}={file_id[:20]}...")
+
+    from game.data import get_item_name, get_item_emoji
+    emoji = get_item_emoji(item_key)
+    name = get_item_name(item_key)
+    await update.message.reply_text(
+        f"✅ Foto untuk {emoji} **{name}** (`{item_key}`) berhasil di-set!\n"
+        f"File ID: `{file_id[:30]}...`",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+@admin_only
+async def viewphoto_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin checks which items have photos set."""
+    args = ctx.args
+    if args:
+        # View specific item photo
+        item_key = args[0].lower()
+        photo_id = await get_setting(f"photo_{item_key}")
+        if photo_id:
+            from game.data import get_item_name, get_item_emoji
+            emoji = get_item_emoji(item_key)
+            name = get_item_name(item_key)
+            try:
+                await update.message.reply_photo(
+                    photo=photo_id,
+                    caption=f"{emoji} **{name}** (`{item_key}`)\n✅ Foto sudah di-set",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                await update.message.reply_text(f"❌ Gagal load foto: {e}")
+        else:
+            await update.message.reply_text(f"❌ Item `{item_key}` belum ada foto.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # List all items with photos
+    async with get_db() as db:
+        rows = await fetchall(db, "SELECT key, value FROM game_settings WHERE key LIKE 'photo_%'")
+        photos = [dict(r) for r in rows]
+
+    if not photos:
+        await update.message.reply_text("📸 Belum ada item yang di-set fotonya.\n\nGunakan: Reply foto + `/setphoto <item_key>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    from game.data import get_item_name, get_item_emoji
+    lines = ["📸 **Item dengan Foto:**\n"]
+    for p in photos:
+        item_key = p["key"].replace("photo_", "")
+        emoji = get_item_emoji(item_key)
+        name = get_item_name(item_key)
+        lines.append(f"✅ {emoji} {name} (`{item_key}`)")
+
+    lines.append(f"\nTotal: {len(photos)} item")
+    lines.append("\nLihat foto: `/viewphoto <item_key>`")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+@admin_only
+async def delphoto_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin deletes a photo for an item."""
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/delphoto <item_key>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    item_key = args[0].lower()
+    photo_id = await get_setting(f"photo_{item_key}")
+    if not photo_id:
+        await update.message.reply_text(f"❌ Item `{item_key}` tidak punya foto.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    async with get_db() as db:
+        await db.execute("DELETE FROM game_settings WHERE key = ?", (f"photo_{item_key}",))
+        await db.commit()
+
+    await log_admin_action(update.effective_user.id, "del_photo", details=item_key)
+    from game.data import get_item_name, get_item_emoji
+    emoji = get_item_emoji(item_key)
+    name = get_item_name(item_key)
+    await update.message.reply_text(f"✅ Foto {emoji} **{name}** (`{item_key}`) berhasil dihapus.", parse_mode=ParseMode.MARKDOWN)
+
+@admin_only
+async def users_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin command to list all users."""
+    async with get_db() as db:
+        total_row = await fetchone(db, "SELECT COUNT(*) as c FROM users")
+        total = total_row["c"]
+        rows = await fetchall(db,
+            "SELECT user_id, first_name, display_name, username, level, coins, xp, total_harvests, total_sales, created_at "
+            "FROM users ORDER BY level DESC, xp DESC LIMIT 20"
+        )
+        users = [dict(r) for r in rows]
+
+    lines = [f"👥 **Semua Pemain** ({total} total)\n"]
+    for i, u in enumerate(users, 1):
+        name = u["display_name"] if u.get("display_name") else u["first_name"]
+        uname = f"@{u['username']}" if u["username"] else ""
+        lines.append(
+            f"**#{i}** {name} {uname}\n"
+            f"   🪪 `{u['user_id']}`\n"
+            f"   👑 Lv{u['level']} | 💵 Rp{u['coins']:,} | 📈 {u['xp']:,} XP\n"
+            f"   🌾 {u['total_harvests']} panen | 🚚 {u['total_sales']} jual\n"
+        )
+    if total > 20:
+        lines.append(f"\n_...dan {total - 20} pemain lainnya. Gunakan /admin → 👥 Kelola Pengguna untuk lihat semua._")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+# ─── SET MARKET CHANNEL ─────────────────────────────────────────────────────
+
+@admin_only
+async def setchannel_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin sets the market channel for listing broadcasts."""
+    args = ctx.args
+    if not args:
+        current = await get_setting("market_channel")
+        status = f"Channel saat ini: `{current}`" if current else "Belum ada channel yang di-set."
+        await update.message.reply_text(
+            f"📢 **Set Market Channel**\n\n"
+            f"{status}\n\n"
+            f"Cara pakai:\n"
+            f"`/setchannel @namachannel`\n"
+            f"`/setchannel -100123456789`\n\n"
+            f"Bot harus jadi **admin** di channel tersebut!\n"
+            f"Untuk hapus: `/setchannel off`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    channel = args[0].strip()
+    if channel.lower() == "off":
+        await set_setting("market_channel", "")
+        await log_admin_action(update.effective_user.id, "set_channel", details="disabled")
+        await update.message.reply_text("✅ Market channel dinonaktifkan.")
+        return
+
+    # Test send to channel
+    try:
+        test_msg = await ctx.bot.send_message(
+            chat_id=channel,
+            text="✅ **Harvest Kingdom Market** terhubung ke channel ini!\n\nSemua listing pasar akan muncul di sini.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await set_setting("market_channel", channel)
+        await log_admin_action(update.effective_user.id, "set_channel", details=channel)
+        await update.message.reply_text(f"✅ Market channel di-set ke `{channel}`!", parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ Gagal kirim ke channel `{channel}`!\n\n"
+            f"Pastikan:\n"
+            f"1. Bot sudah jadi **admin** di channel\n"
+            f"2. Channel ID/username benar\n\n"
+            f"Error: `{e}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
