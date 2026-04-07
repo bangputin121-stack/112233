@@ -58,6 +58,8 @@ from handlers.admin_handlers import (
     givegems_cmd, addgemitem_cmd, delgemitem_cmd, togglegemitem_cmd,
     listgemitems_cmd, createcode_cmd, delcode_cmd, listcodes_cmd,
     addanimal_cmd, delanimal_cmd, listanimals_cmd,
+    addcrop_cmd, delcrop_cmd, listcrops_cmd,
+    addrecipe_cmd, delrecipe_cmd, listrecipes_cmd,
 )
 
 load_dotenv()
@@ -119,6 +121,12 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("addanimal", addanimal_cmd))
     app.add_handler(CommandHandler("delanimal", delanimal_cmd))
     app.add_handler(CommandHandler("listanimals", listanimals_cmd))
+    app.add_handler(CommandHandler("addcrop", addcrop_cmd))
+    app.add_handler(CommandHandler("delcrop", delcrop_cmd))
+    app.add_handler(CommandHandler("listcrops", listcrops_cmd))
+    app.add_handler(CommandHandler("addrecipe", addrecipe_cmd))
+    app.add_handler(CommandHandler("delrecipe", delrecipe_cmd))
+    app.add_handler(CommandHandler("listrecipes", listrecipes_cmd))
     app.add_handler(CommandHandler("setphoto", setphoto_cmd))
     app.add_handler(CommandHandler("viewphoto", viewphoto_cmd))
     app.add_handler(CommandHandler("delphoto", delphoto_cmd))
@@ -281,6 +289,12 @@ def main():
         from game.custom_animals import init_custom_animals_table, load_custom_animals
         await init_custom_animals_table()
         await load_custom_animals()
+        from game.custom_crops import init_custom_crops_table, load_custom_crops
+        await init_custom_crops_table()
+        await load_custom_crops()
+        from game.custom_recipes import init_custom_recipes_table, load_custom_recipes
+        await init_custom_recipes_table()
+        await load_custom_recipes()
         logger.info("✅ Database initialized")
         admin_ids = get_admin_ids()
         if admin_ids:
