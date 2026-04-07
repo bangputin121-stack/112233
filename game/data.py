@@ -215,6 +215,10 @@ PROCESSED_EMOJI = {
 CUSTOM_ANIMAL_PRODUCTS = {}      # {product_key: emoji}
 CUSTOM_ANIMAL_PRODUCT_NAMES = {} # {product_key: display_name}
 
+# Registry runtime untuk produk olahan custom dari resep tambahan
+CUSTOM_PROCESSED_EMOJI = {}      # {recipe_key: emoji}
+CUSTOM_PROCESSED_NAMES = {}      # {recipe_key: display_name}
+
 
 def get_item_emoji(item_key: str) -> str:
     if item_key in CROPS:
@@ -227,6 +231,8 @@ def get_item_emoji(item_key: str) -> str:
         return CLEARING_TOOLS[item_key]["emoji"]
     if item_key in PROCESSED_EMOJI:
         return PROCESSED_EMOJI[item_key]
+    if item_key in CUSTOM_PROCESSED_EMOJI:
+        return CUSTOM_PROCESSED_EMOJI[item_key]
     if item_key in CUSTOM_ANIMAL_PRODUCTS:
         return CUSTOM_ANIMAL_PRODUCTS[item_key]
     animal_products = {
@@ -240,6 +246,8 @@ def get_item_name(item_key: str) -> str:
     for db in [CROPS, UPGRADE_TOOLS, EXPANSION_TOOLS, CLEARING_TOOLS]:
         if item_key in db:
             return db[item_key]["name"]
+    if item_key in CUSTOM_PROCESSED_NAMES:
+        return CUSTOM_PROCESSED_NAMES[item_key]
     for b in BUILDINGS.values():
         if item_key in b["recipes"]:
             return item_key.replace("_", " ").title()
