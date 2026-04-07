@@ -1399,3 +1399,159 @@ async def noop_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def locked_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer("🔒 Naik level untuk membuka ini!", show_alert=True)
+
+
+# ─── TOKO PERMATA (Player Side) ──────────────────────────────────────────────
+
+async def _render_gem_shop(user_id: int, msg_text_extra: str = "") -> tuple[str, InlineKeyboardMarkup]:
+    from game.gems import list_gem_items
+    from database.db import get_user
+    db_user = await get_user(user_id)
+    items = await list_gem_items(active_only=True)
+
+    text = (
+        f"💎 **TOKO PERMATA**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 Permata kamu: **{db_user['gems']}**\n\n"
+    )
+    if msg_text_extra:
+        text += msg_text_extra + "\n\n"
+
+    if not items:
+        text += "📭 Toko sedang kosong.\nTunggu admin tambahin item baru!\n\n"
+    else:
+        text += "Pilih item buat dibeli 👇\n\n"
+        for it in items:
+            stock_info = "" if it["stock"] < 0 else f"  _(stok: {it['stock']})_"
+            text += f"{it['emoji']} **{it['name']}** — {it['price_gems']}💎{stock_info}\n"
+            if it["description"]:
+                text += f"   _{it['description']}_\n"
+            text += "\n"
+
+    text += (
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 Permata cuma bisa didapat dari **event spesial** yang dibuat admin.\n"
+        "Punya code event? Tap **🎟 Tukar Code** di bawah!"
+    )
+
+    buttons = []
+    for it in items:
+        label = f"{it['emoji']} {it['name']} — {it['price_gems']}💎"
+        buttons.append([InlineKeyboardButton(label[:55], callback_data=f"gembuy_{it['id']}")])
+    buttons.append([InlineKeyboardButton("🎟 Tukar Code Event", callback_data="redeem_prompt")])
+    buttons.append([InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")])
+    return text, InlineKeyboardMarkup(buttons)
+
+
+async def gemshop_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    text, kb = await _render_gem_shop(user.id)
+    await safe_edit(query, text, kb)
+
+
+async def gemshop_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    text, kb = await _render_gem_shop(user.id)
+    await safe_send(update, text, kb)
+
+
+async def gembuy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    item_id = int(query.data.split("_")[1])
+    user = query.from_user
+    from game.gems import get_gem_item
+    from database.db import get_user
+    item = await get_gem_item(item_id)
+    if not item:
+        await query.answer("❌ Item tidak ditemukan", show_alert=True)
+        return
+    db_user = await get_user(user.id)
+    stock_info = "Tak terbatas" if item["stock"] < 0 else f"{item['stock']} tersisa"
+    text = (
+        f"💎 **Konfirmasi Pembelian**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{item['emoji']} **{item['name']}**\n"
+        f"_{item['description'] or 'Tidak ada deskripsi'}_\n\n"
+        f"💰 Harga: **{item['price_gems']} 💎**\n"
+        f"📦 Stok: {stock_info}\n"
+        f"💎 Permata kamu: {db_user['gems']}\n\n"
+        f"Yakin mau beli?"
+    )
+    buttons = [
+        [InlineKeyboardButton("✅ Konfirmasi Beli", callback_data=f"gemconfirm_{item_id}")],
+        [InlineKeyboardButton("❌ Batal", callback_data="gemshop")],
+    ]
+    await safe_edit(query, text, InlineKeyboardMarkup(buttons))
+
+
+async def gemconfirm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    item_id = int(query.data.split("_")[1])
+    user = query.from_user
+    from game.gems import buy_gem_item
+
+    ok, msg, info = await buy_gem_item(user.id, item_id)
+    await query.answer(msg[:200], show_alert=True)
+
+    # Notif ke admin kalau perlu manual
+    if ok and info and info.get("needs_admin"):
+        from handlers.admin_handlers import get_admin_ids
+        admin_text = (
+            f"🛒 **Pembelian Toko Permata**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 User: {user.first_name} (`{user.id}`)\n"
+            f"🎁 Item: {info['item']['emoji']} {info['item']['name']}\n"
+            f"💎 Harga: {info['item']['price_gems']} permata\n"
+            f"📝 Tipe: `{info['item']['reward_type']}`\n"
+            f"📝 Detail: `{info['item']['reward_value']}`\n\n"
+            f"_Mohon proses item ini secara manual untuk user._"
+        )
+        try:
+            for aid in get_admin_ids():
+                await ctx.bot.send_message(aid, admin_text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Gagal notif admin: {e}")
+
+    # Refresh tampilan toko
+    text, kb = await _render_gem_shop(user.id, msg_text_extra=msg if ok else "")
+    await safe_edit(query, text, kb)
+
+
+async def redeem_prompt_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    text = (
+        "🎟 **Tukar Code Event**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Punya code dari event yang dibagikan admin?\n\n"
+        "Ketik command:\n"
+        "`/redeem KODE_KAMU`\n\n"
+        "**Contoh:**\n"
+        "`/redeem EVENT2026`\n\n"
+        "Code biasanya dibagikan admin lewat:\n"
+        "📢 Channel pasar\n"
+        "👥 Grup official"
+    )
+    buttons = [[InlineKeyboardButton("⬅️ Kembali", callback_data="gemshop")]]
+    await safe_edit(query, text, InlineKeyboardMarkup(buttons))
+
+
+async def redeem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    args = ctx.args
+    if not args:
+        await safe_send(update,
+            "🎟 **Tukar Code Event**\n\n"
+            "Cara pakai: `/redeem KODE_KAMU`\n"
+            "Contoh: `/redeem EVENT2026`")
+        return
+    from game.gems import redeem_code as redeem_event_code
+    ok, msg = await redeem_event_code(user.id, args[0])
+    await safe_send(update, msg)
