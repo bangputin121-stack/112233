@@ -40,6 +40,8 @@ from handlers.main_handlers import (
     daily_callback, daily_cmd,
     help_callback, help_cmd,
     noop_callback, locked_callback,
+    gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
+    redeem_prompt_callback, redeem_cmd,
 )
 from handlers.admin_handlers import (
     admin_cmd, adm_panel_callback, adm_stats_callback,
@@ -53,6 +55,8 @@ from handlers.admin_handlers import (
     give_cmd, givecoins_cmd, setphoto_cmd, viewphoto_cmd, delphoto_cmd,
     setchannel_cmd, users_cmd,
     get_admin_ids,
+    givegems_cmd, addgemitem_cmd, delgemitem_cmd, togglegemitem_cmd,
+    listgemitems_cmd, createcode_cmd, delcode_cmd, listcodes_cmd,
 )
 
 load_dotenv()
@@ -96,11 +100,21 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("shop", shop_cmd))
     app.add_handler(CommandHandler("tutorial", tutorial_cmd))
     app.add_handler(CommandHandler("items", items_cmd))
+    app.add_handler(CommandHandler("gemshop", gemshop_cmd))
+    app.add_handler(CommandHandler("redeem", redeem_cmd))
 
     # Admin commands
     app.add_handler(CommandHandler("admin", admin_cmd))
     app.add_handler(CommandHandler("give", give_cmd))
     app.add_handler(CommandHandler("givecoins", givecoins_cmd))
+    app.add_handler(CommandHandler("givegems", givegems_cmd))
+    app.add_handler(CommandHandler("addgemitem", addgemitem_cmd))
+    app.add_handler(CommandHandler("delgemitem", delgemitem_cmd))
+    app.add_handler(CommandHandler("togglegemitem", togglegemitem_cmd))
+    app.add_handler(CommandHandler("listgemitems", listgemitems_cmd))
+    app.add_handler(CommandHandler("createcode", createcode_cmd))
+    app.add_handler(CommandHandler("delcode", delcode_cmd))
+    app.add_handler(CommandHandler("listcodes", listcodes_cmd))
     app.add_handler(CommandHandler("setphoto", setphoto_cmd))
     app.add_handler(CommandHandler("viewphoto", viewphoto_cmd))
     app.add_handler(CommandHandler("delphoto", delphoto_cmd))
@@ -205,6 +219,12 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(noop_callback, pattern="^noop$"))
     app.add_handler(CallbackQueryHandler(locked_callback, pattern="^locked$"))
 
+    # Toko Permata
+    app.add_handler(CallbackQueryHandler(gemshop_callback, pattern="^gemshop$"))
+    app.add_handler(CallbackQueryHandler(gembuy_callback, pattern=r"^gembuy_\d+$"))
+    app.add_handler(CallbackQueryHandler(gemconfirm_callback, pattern=r"^gemconfirm_\d+$"))
+    app.add_handler(CallbackQueryHandler(redeem_prompt_callback, pattern="^redeem_prompt$"))
+
     # Admin panel callbacks
     app.add_handler(CallbackQueryHandler(adm_panel_callback, pattern="^adm_panel$"))
     app.add_handler(CallbackQueryHandler(adm_stats_callback, pattern="^adm_stats$"))
@@ -252,6 +272,8 @@ def main():
 
     async def post_init(app: Application):
         await init_db()
+        from game.gems import init_gem_tables
+        await init_gem_tables()
         logger.info("✅ Database initialized")
         admin_ids = get_admin_ids()
         if admin_ids:
