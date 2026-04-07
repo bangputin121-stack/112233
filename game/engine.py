@@ -45,6 +45,10 @@ def is_silo_item(item_key: str) -> bool:
     animal_raw = {"egg", "milk", "bacon", "wool", "goat_milk", "honey", "feather", "fish", "lobster", "mozzarella"}
     if item_key in animal_raw:
         return True
+    # Produk hewan custom yang ditambahin admin lewat /addanimal
+    from game.data import CUSTOM_ANIMAL_PRODUCTS
+    if item_key in CUSTOM_ANIMAL_PRODUCTS:
+        return True
     return False
 
 def is_barn_item(item_key: str) -> bool:
