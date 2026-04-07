@@ -1227,3 +1227,263 @@ async def listanimals_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(text) > 4000:
         text = text[:3990] + "\n_(dipotong)_"
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+# ─── ADMIN: TANAMAN CUSTOM ──────────────────────────────────────────────────
+
+@admin_only
+async def addcrop_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Format:
+    /addcrop <key> <emoji> <menit> <harga_benih> <harga_jual> <xp> <level> | <Nama Tanaman>
+    
+    Contoh:
+    /addcrop kopi ☕ 480 8000 16000 18 12 | Kopi
+    /addcrop teh 🍵 240 4000 9000 10 8 | Daun Teh
+    """
+    raw = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "**Cara pakai:**\n"
+            "`/addcrop <key> <emoji> <menit> <benih> <jual> <xp> <level> | Nama Tanaman`\n\n"
+            "**Contoh:**\n"
+            "`/addcrop kopi ☕ 480 8000 16000 18 12 | Kopi`\n"
+            "→ Key `kopi`, tumbuh 480 menit (8 jam), benih Rp8rb, jual Rp16rb, +18 XP, Lv12",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    body = parts[1]
+    pipe_parts = [p.strip() for p in body.split("|")]
+    if len(pipe_parts) < 2:
+        await update.message.reply_text("❌ Format salah. Pakai `|` buat pisah header dari Nama.",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+
+    head = pipe_parts[0].split()
+    if len(head) < 7:
+        await update.message.reply_text(
+            "❌ Header butuh 7 field: `<key> <emoji> <menit> <benih> <jual> <xp> <level>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    crop_key = head[0]
+    emoji = head[1]
+    try:
+        grow_time = int(head[2]) * 60
+        seed_cost = int(head[3])
+        sell_price = int(head[4])
+        xp = int(head[5])
+        level_req = int(head[6])
+    except ValueError:
+        await update.message.reply_text("❌ Menit/harga/xp/level harus angka.")
+        return
+
+    name = pipe_parts[1]
+
+    from game.custom_crops import add_custom_crop
+    ok, msg = await add_custom_crop(crop_key, name, emoji, grow_time,
+                                     seed_cost, sell_price, xp, level_req,
+                                     update.effective_user.id)
+    if ok:
+        await log_admin_action(update.effective_user.id, "add_crop", details=f"{crop_key}:{name}")
+        await update.message.reply_text(
+            f"✅ **Tanaman ditambahkan!**\n\n"
+            f"{emoji} **{name}** (`{crop_key}`)\n"
+            f"⏱ Tumbuh: {grow_time//60} menit\n"
+            f"💵 Benih: Rp{seed_cost:,}\n"
+            f"💵 Jual: Rp{sell_price:,}\n"
+            f"⭐ XP: +{xp}\n"
+            f"🔒 Level: {level_req}\n\n"
+            f"Player Lv{level_req}+ langsung bisa nanem!",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def delcrop_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/delcrop <key>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    from game.custom_crops import delete_custom_crop
+    ok, msg = await delete_custom_crop(args[0])
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    if ok:
+        await log_admin_action(update.effective_user.id, "del_crop", details=args[0])
+
+
+@admin_only
+async def listcrops_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from game.custom_crops import list_custom_crops
+    from game.data import CROPS
+    custom = await list_custom_crops()
+    custom_keys = {c["crop_key"] for c in custom}
+
+    lines = ["🌾 **DAFTAR SEMUA TANAMAN**\n━━━━━━━━━━━━━━━━━━━━\n"]
+    lines.append("**🔧 Default:**")
+    for k, v in CROPS.items():
+        if k in custom_keys:
+            continue
+        lines.append(f"  {v['emoji']} `{k}` — {v['name']} | Lv{v['level_req']}")
+
+    lines.append("\n**✏️ Custom:**")
+    if not custom:
+        lines.append("  _(belum ada)_")
+    else:
+        for c in custom:
+            lines.append(
+                f"  {c['emoji']} `{c['crop_key']}` — {c['name']} | "
+                f"Lv{c['level_req']} | {c['grow_time']//60}m | "
+                f"Rp{c['seed_cost']:,}→{c['sell_price']:,}"
+            )
+
+    lines.append("\n**Command:** `/addcrop`, `/delcrop <key>`")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n_(dipotong)_"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+# ─── ADMIN: RESEP PABRIK CUSTOM ─────────────────────────────────────────────
+
+@admin_only
+async def addrecipe_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Format:
+    /addrecipe <pabrik> <recipe_key> <emoji> <inputs> <menit> <harga_jual> <xp> | <Nama Produk>
+    
+    inputs format: item1:qty1,item2:qty2
+    
+    Contoh:
+    /addrecipe kitchen kopi_hitam ☕ kopi:2 30 25000 15 | Kopi Hitam
+    /addrecipe dairy susu_kuda 🥛 surai:3,milk:2 120 45000 25 | Susu Kuda
+    """
+    raw = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "**Cara pakai:**\n"
+            "`/addrecipe <pabrik> <recipe_key> <emoji> <inputs> <menit> <jual> <xp> | Nama Produk`\n\n"
+            "**`inputs` format:** `item:qty,item:qty`\n"
+            "cth: `kopi:2` atau `kopi:2,milk:1,honey:1`\n\n"
+            "**Pabrik yang ada:** bakery, feed_mill, dairy, textile_mill, kitchen\n"
+            "_(atau pabrik lain yang admin bikin nanti)_\n\n"
+            "**Contoh:**\n"
+            "`/addrecipe kitchen kopi_hitam ☕ kopi:2 30 25000 15 | Kopi Hitam`\n"
+            "`/addrecipe dairy yogurt_surai 🥛 surai:3,milk:2 120 45000 25 | Yogurt Surai`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    body = parts[1]
+    pipe_parts = [p.strip() for p in body.split("|")]
+    if len(pipe_parts) < 2:
+        await update.message.reply_text(
+            "❌ Format salah. Pakai `|` buat pisah header dari Nama Produk.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    head = pipe_parts[0].split()
+    if len(head) < 7:
+        await update.message.reply_text(
+            "❌ Header butuh 7 field: `<pabrik> <recipe_key> <emoji> <inputs> <menit> <jual> <xp>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    building_key = head[0].lower()
+    recipe_key = head[1].lower()
+    emoji = head[2]
+    inputs_raw = head[3]
+    try:
+        time_seconds = int(head[4]) * 60
+        sell_price = int(head[5])
+        xp = int(head[6])
+    except ValueError:
+        await update.message.reply_text("❌ Menit/harga/xp harus angka.")
+        return
+
+    # Parse inputs: "kopi:2,milk:1" → {"kopi": 2, "milk": 1}
+    inputs = {}
+    try:
+        for pair in inputs_raw.split(","):
+            ik, qty = pair.split(":")
+            inputs[ik.strip()] = int(qty)
+    except Exception:
+        await update.message.reply_text(
+            "❌ Format inputs salah. Contoh benar: `kopi:2` atau `kopi:2,milk:1`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    name = pipe_parts[1]
+
+    from game.custom_recipes import add_custom_recipe
+    ok, msg = await add_custom_recipe(building_key, recipe_key, name, emoji,
+                                       inputs, time_seconds, sell_price, xp,
+                                       update.effective_user.id)
+    if ok:
+        await log_admin_action(update.effective_user.id, "add_recipe",
+                               details=f"{building_key}:{recipe_key}")
+        inputs_display = " + ".join(f"{q}x {k}" for k, q in inputs.items())
+        await update.message.reply_text(
+            f"✅ **Resep ditambahkan!**\n\n"
+            f"{emoji} **{name}** (`{recipe_key}`)\n"
+            f"🏭 Pabrik: `{building_key}`\n"
+            f"📥 Bahan: {inputs_display}\n"
+            f"⏱ Produksi: {time_seconds//60} menit\n"
+            f"💵 Jual: Rp{sell_price:,}\n"
+            f"⭐ XP: +{xp}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def delrecipe_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/delrecipe <recipe_key>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    from game.custom_recipes import delete_custom_recipe
+    ok, msg = await delete_custom_recipe(args[0])
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    if ok:
+        await log_admin_action(update.effective_user.id, "del_recipe", details=args[0])
+
+
+@admin_only
+async def listrecipes_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from game.custom_recipes import list_custom_recipes
+    from game.data import BUILDINGS
+    import json as _json
+    custom = await list_custom_recipes()
+    custom_keys = {c["recipe_key"] for c in custom}
+
+    lines = ["🏭 **DAFTAR RESEP PABRIK**\n━━━━━━━━━━━━━━━━━━━━\n"]
+    for bk, bv in BUILDINGS.items():
+        lines.append(f"\n**{bv['emoji']} {bv['name']}** (`{bk}`)")
+        for rk, rv in bv["recipes"].items():
+            is_custom = rk in custom_keys
+            marker = "✏️" if is_custom else "🔧"
+            ins = " + ".join(f"{q}x{k}" for k, q in rv["inputs"].items())
+            lines.append(
+                f"  {marker} `{rk}` — {ins} → Rp{rv['sell_price']:,} "
+                f"({rv['time']//60}m, +{rv['xp']}xp)"
+            )
+
+    lines.append("\n🔧 = default, ✏️ = custom (bisa dihapus)")
+    lines.append("**Command:** `/addrecipe`, `/delrecipe <key>`")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n_(dipotong)_"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
