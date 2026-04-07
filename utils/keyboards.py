@@ -20,18 +20,21 @@ def main_menu_keyboard():
         ],
         [
             InlineKeyboardButton("🛒 Toko Alat", callback_data="shop"),
+            InlineKeyboardButton("💎 Toko Permata", callback_data="gemshop"),
+        ],
+        [
             InlineKeyboardButton("🗺️ Lahan", callback_data="land"),
-        ],
-        [
             InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard"),
+        ],
+        [
             InlineKeyboardButton("📊 Profil", callback_data="profile"),
-        ],
-        [
             InlineKeyboardButton("🎁 Hadiah Harian", callback_data="daily"),
-            InlineKeyboardButton("📖 Tutorial", callback_data="tutorial"),
         ],
         [
+            InlineKeyboardButton("📖 Tutorial", callback_data="tutorial"),
             InlineKeyboardButton("📚 Katalog Item", callback_data="items_all"),
+        ],
+        [
             InlineKeyboardButton("❓ Bantuan", callback_data="help"),
         ],
     ])
