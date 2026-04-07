@@ -1079,3 +1079,151 @@ async def listcodes_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     lines.append("\n**Command:**\n`/createcode <kode> <gems> <max>`\n`/delcode <kode>`")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+# ─── ADMIN: HEWAN CUSTOM ─────────────────────────────────────────────────────
+
+@admin_only
+async def addanimal_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Format:
+    /addanimal <key> <emoji> <produk_key> <prod_emoji> <waktu_menit> <beli> <jual> <level> | <Nama Hewan> | <Nama Produk>
+    
+    Contoh:
+    /addanimal kuda 🐎 surai 🎀 240 80000 9000 6 | Kuda | Surai Kuda
+    /addanimal kelinci 🐰 bulu_halus 🧶 120 25000 4500 4 | Kelinci | Bulu Halus
+    """
+    raw = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "**Cara pakai:**\n"
+            "`/addanimal <key> <emoji> <produk_key> <prod_emoji> <menit> <beli> <jual> <level> | Nama Hewan | Nama Produk`\n\n"
+            "**Penjelasan:**\n"
+            "• `key` — ID unik hewan (huruf kecil, no spasi). cth: `kuda`\n"
+            "• `emoji` — emoji hewan. cth: 🐎\n"
+            "• `produk_key` — ID produk (huruf kecil). cth: `surai`\n"
+            "• `prod_emoji` — emoji produk. cth: 🎀\n"
+            "• `menit` — waktu produksi dalam menit. cth: `240` (= 4 jam)\n"
+            "• `beli` — harga beli hewan dalam Rp. cth: `80000`\n"
+            "• `jual` — harga jual produk per unit. cth: `9000`\n"
+            "• `level` — minimum level player buat unlock. cth: `6`\n"
+            "• `Nama Hewan` — display name hewan\n"
+            "• `Nama Produk` — display name produk\n\n"
+            "**Contoh:**\n"
+            "`/addanimal kuda 🐎 surai 🎀 240 80000 9000 6 | Kuda | Surai Kuda`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    body = parts[1]
+    pipe_parts = [p.strip() for p in body.split("|")]
+    if len(pipe_parts) < 3:
+        await update.message.reply_text(
+            "❌ Format salah. Harus ada 2 tanda `|` buat pisah Nama Hewan & Nama Produk.\n\n"
+            "Contoh:\n"
+            "`/addanimal kuda 🐎 surai 🎀 240 80000 9000 6 | Kuda | Surai Kuda`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    head = pipe_parts[0].split()
+    if len(head) < 8:
+        await update.message.reply_text(
+            "❌ Header butuh 8 field: `<key> <emoji> <produk> <prod_emoji> <menit> <beli> <jual> <level>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    animal_key = head[0]
+    emoji = head[1]
+    product_key = head[2]
+    prod_emoji = head[3]
+    try:
+        feed_time = int(head[4]) * 60  # menit -> detik
+        buy_cost = int(head[5])
+        sell_price = int(head[6])
+        level_req = int(head[7])
+    except ValueError:
+        await update.message.reply_text("❌ Menit/harga/level harus angka.")
+        return
+
+    name = pipe_parts[1]
+    product_name = pipe_parts[2]
+
+    from game.custom_animals import add_custom_animal
+    ok, msg = await add_custom_animal(
+        animal_key, name, emoji, product_key, product_name, prod_emoji,
+        feed_time, buy_cost, sell_price, level_req, update.effective_user.id
+    )
+    if ok:
+        await log_admin_action(update.effective_user.id, "add_animal",
+                               details=f"{animal_key}:{name}")
+        await update.message.reply_text(
+            f"✅ **Hewan ditambahkan!**\n\n"
+            f"{emoji} **{name}** (`{animal_key}`)\n"
+            f"📦 Produk: {prod_emoji} {product_name}\n"
+            f"⏱ Produksi: {feed_time//60} menit\n"
+            f"💵 Beli: Rp{buy_cost:,}\n"
+            f"💵 Jual produk: Rp{sell_price:,}/unit\n"
+            f"🔒 Level: {level_req}\n\n"
+            f"Player Lv{level_req}+ udah bisa beli di menu Hewan!",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def delanimal_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "Cara pakai: `/delanimal <key>`\nContoh: `/delanimal kuda`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    from game.custom_animals import delete_custom_animal
+    ok, msg = await delete_custom_animal(args[0])
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    if ok:
+        await log_admin_action(update.effective_user.id, "del_animal", details=args[0])
+
+
+@admin_only
+async def listanimals_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from game.custom_animals import list_custom_animals
+    from game.data import ANIMALS
+    custom = await list_custom_animals()
+
+    lines = ["🐾 **DAFTAR SEMUA HEWAN**\n━━━━━━━━━━━━━━━━━━━━\n"]
+    lines.append("**🔧 Default (hardcoded, nggak bisa dihapus):**")
+    custom_keys = {c["animal_key"] for c in custom}
+    for k, v in ANIMALS.items():
+        if k in custom_keys:
+            continue
+        lines.append(
+            f"  {v['emoji']} `{k}` — {v['name']} | "
+            f"Lv{v['level_req']} | Rp{v['buy_cost']:,}"
+        )
+
+    lines.append("\n**✏️ Custom (bisa dihapus pake `/delanimal`):**")
+    if not custom:
+        lines.append("  _(belum ada)_")
+    else:
+        for c in custom:
+            lines.append(
+                f"  {c['emoji']} `{c['animal_key']}` — {c['name']} | "
+                f"Lv{c['level_req']} | Rp{c['buy_cost']:,}\n"
+                f"      → {c['prod_emoji']} {c['product_name']} (Rp{c['sell_price']:,}/unit, {c['feed_time']//60}m)"
+            )
+
+    lines.append(
+        "\n**Command admin:**\n"
+        "`/addanimal` — tambah hewan baru\n"
+        "`/delanimal <key>` — hapus hewan custom"
+    )
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n_(dipotong)_"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
