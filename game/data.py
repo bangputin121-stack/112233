@@ -210,6 +210,12 @@ PROCESSED_EMOJI = {
     "cow_feed": "🌿",
 }
 
+# Registry runtime untuk hewan custom yang ditambahin admin lewat /addanimal
+# Diisi dari database pas bot start oleh game/custom_animals.py
+CUSTOM_ANIMAL_PRODUCTS = {}      # {product_key: emoji}
+CUSTOM_ANIMAL_PRODUCT_NAMES = {} # {product_key: display_name}
+
+
 def get_item_emoji(item_key: str) -> str:
     if item_key in CROPS:
         return CROPS[item_key]["emoji"]
@@ -221,6 +227,8 @@ def get_item_emoji(item_key: str) -> str:
         return CLEARING_TOOLS[item_key]["emoji"]
     if item_key in PROCESSED_EMOJI:
         return PROCESSED_EMOJI[item_key]
+    if item_key in CUSTOM_ANIMAL_PRODUCTS:
+        return CUSTOM_ANIMAL_PRODUCTS[item_key]
     animal_products = {
         "egg": "🥚", "milk": "🥛", "bacon": "🥩", "wool": "🧶",
         "goat_milk": "🧴", "honey": "🍯", "feather": "🪶", "fish": "🐠",
@@ -235,6 +243,8 @@ def get_item_name(item_key: str) -> str:
     for b in BUILDINGS.values():
         if item_key in b["recipes"]:
             return item_key.replace("_", " ").title()
+    if item_key in CUSTOM_ANIMAL_PRODUCT_NAMES:
+        return CUSTOM_ANIMAL_PRODUCT_NAMES[item_key]
     animal_products = {
         "egg": "Egg", "milk": "Milk", "bacon": "Bacon", "wool": "Wool",
         "goat_milk": "Goat Milk", "honey": "Honey", "feather": "Feather",
