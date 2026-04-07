@@ -57,6 +57,7 @@ from handlers.admin_handlers import (
     get_admin_ids,
     givegems_cmd, addgemitem_cmd, delgemitem_cmd, togglegemitem_cmd,
     listgemitems_cmd, createcode_cmd, delcode_cmd, listcodes_cmd,
+    addanimal_cmd, delanimal_cmd, listanimals_cmd,
 )
 
 load_dotenv()
@@ -115,6 +116,9 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("createcode", createcode_cmd))
     app.add_handler(CommandHandler("delcode", delcode_cmd))
     app.add_handler(CommandHandler("listcodes", listcodes_cmd))
+    app.add_handler(CommandHandler("addanimal", addanimal_cmd))
+    app.add_handler(CommandHandler("delanimal", delanimal_cmd))
+    app.add_handler(CommandHandler("listanimals", listanimals_cmd))
     app.add_handler(CommandHandler("setphoto", setphoto_cmd))
     app.add_handler(CommandHandler("viewphoto", viewphoto_cmd))
     app.add_handler(CommandHandler("delphoto", delphoto_cmd))
@@ -274,6 +278,9 @@ def main():
         await init_db()
         from game.gems import init_gem_tables
         await init_gem_tables()
+        from game.custom_animals import init_custom_animals_table, load_custom_animals
+        await init_custom_animals_table()
+        await load_custom_animals()
         logger.info("✅ Database initialized")
         admin_ids = get_admin_ids()
         if admin_ids:
