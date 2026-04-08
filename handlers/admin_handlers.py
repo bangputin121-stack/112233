@@ -1,4 +1,4 @@
-# handlers/admin_handlers.py - Admin panel for Harvest Kingdom
+# handlers/admin_handlers.py - Admin panel for Greena Farm
 
 import os
 import json
@@ -78,7 +78,7 @@ def admin_settings_keyboard():
 @admin_only
 async def admin_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👑 **Panel Admin — Harvest Kingdom**\n\nPilih menu:",
+        "👑 **Panel Admin — Greena Farm**\n\nPilih menu:",
         reply_markup=admin_main_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
@@ -88,7 +88,7 @@ async def adm_panel_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        "👑 **Panel Admin — Harvest Kingdom**\n\nPilih menu:",
+        "👑 **Panel Admin — Greena Farm**\n\nPilih menu:",
         reply_markup=admin_main_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
@@ -814,7 +814,7 @@ async def setchannel_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         test_msg = await ctx.bot.send_message(
             chat_id=channel,
-            text="✅ **Harvest Kingdom Market** terhubung ke channel ini!\n\nSemua listing pasar akan muncul di sini.",
+            text="✅ **Greena Farm Market** terhubung ke channel ini!\n\nSemua listing pasar akan muncul di sini.",
             parse_mode=ParseMode.MARKDOWN
         )
         await set_setting("market_channel", channel)
