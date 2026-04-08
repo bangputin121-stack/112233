@@ -47,8 +47,8 @@ async def init_gem_tables():
 async def add_gem_item(name: str, price_gems: int, reward_type: str,
                        reward_value: str, emoji: str = "💎",
                        description: str = "", stock: int = -1) -> int:
-    if reward_type not in ("coins", "item", "custom"):
-        raise ValueError("reward_type harus 'coins', 'item', atau 'custom'")
+    if reward_type not in ("coins", "item", "custom", "title"):
+        raise ValueError("reward_type harus 'coins', 'item', 'custom', atau 'title'")
     async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO gem_shop_items
@@ -163,6 +163,26 @@ async def buy_gem_item(user_id: int, item_id: int) -> tuple[bool, str, dict | No
     elif rt == "custom":
         delivery_msg = "📨 Pesananmu akan diproses admin secara manual. Tunggu ya!"
         needs_admin = True
+    elif rt == "title":
+        try:
+            from game.titles import give_title_to_user, get_title
+            title = await get_title(rv)
+            if not title:
+                delivery_msg = f"⚠️ Title `{rv}` tidak ditemukan, hubungi admin."
+                needs_admin = True
+            else:
+                ok, msg = await give_title_to_user(user_id, rv)
+                if ok:
+                    delivery_msg = (
+                        f"🎭 Gelar **{title['display']}** masuk koleksi kamu!\n"
+                        f"Buka `/mytitles` buat pasang."
+                    )
+                else:
+                    delivery_msg = f"⚠️ {msg}"
+                    needs_admin = True
+        except Exception:
+            delivery_msg = "⚠️ Error kirim title, hubungi admin."
+            needs_admin = True
 
     return True, (
         f"✅ **Pembelian Sukses!**\n\n"
