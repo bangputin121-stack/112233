@@ -1465,7 +1465,6 @@ async def delrecipe_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def listrecipes_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from game.custom_recipes import list_custom_recipes
     from game.data import BUILDINGS
-    import json as _json
     custom = await list_custom_recipes()
     custom_keys = {c["recipe_key"] for c in custom}
 
@@ -1477,7 +1476,7 @@ async def listrecipes_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             marker = "✏️" if is_custom else "🔧"
             ins = " + ".join(f"{q}x{k}" for k, q in rv["inputs"].items())
             lines.append(
-                f"  {marker} `{rk}` — {ins} → Rp{rv['sell_price']:,} "
+                f"  {marker} `{rk}` — `{ins}` → Rp{rv['sell_price']:,} "
                 f"({rv['time']//60}m, +{rv['xp']}xp)"
             )
 
