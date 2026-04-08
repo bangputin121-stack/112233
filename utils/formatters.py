@@ -1,4 +1,4 @@
-# utils/formatters.py - Message text formatters for Harvest Kingdom (Bahasa Indonesia)
+# utils/formatters.py - Message text formatters for Greena Farm (Bahasa Indonesia)
 
 from datetime import datetime, timezone
 from game.data import (
@@ -235,7 +235,7 @@ def fmt_leaderboard(users: list[dict], requester_id: int = None) -> str:
 
     lines = [
         "━━━━━━━━━━━━━━━━━━━━",
-        "🏆 **LEADERBOARD — Harvest Kingdom**",
+        "🏆 **LEADERBOARD — Greena Farm**",
         "━━━━━━━━━━━━━━━━━━━━",
         "",
     ]
@@ -690,6 +690,6 @@ def fmt_all_items(category: str = "all") -> str:
         sections.append("\n".join(lines))
 
     if category == "all":
-        header = "📚 **ENSIKLOPEDIA ITEM — Harvest Kingdom**\n━━━━━━━━━━━━━━━━━━━━\n\nSemua item yang tersedia di game:\n"
+        header = "📚 **ENSIKLOPEDIA ITEM — Greena Farm**\n━━━━━━━━━━━━━━━━━━━━\n\nSemua item yang tersedia di game:\n"
         return header + "\n\n".join(sections)
     return "\n\n".join(sections)
