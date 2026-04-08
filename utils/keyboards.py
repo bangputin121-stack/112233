@@ -319,6 +319,9 @@ def profile_keyboard():
             InlineKeyboardButton("🖼️ Set Avatar", callback_data="setavatar"),
         ],
         [
+            InlineKeyboardButton("🎭 Gelar Saya", callback_data="mytitles"),
+        ],
+        [
             InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard"),
             InlineKeyboardButton("🏠 Menu Utama", callback_data="menu"),
         ],
