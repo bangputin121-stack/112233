@@ -42,6 +42,7 @@ from handlers.main_handlers import (
     noop_callback, locked_callback,
     gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
     redeem_prompt_callback, redeem_cmd,
+    mytitles_cmd, mytitles_callback, title_equip_callback, title_unequip_callback,
 )
 from handlers.admin_handlers import (
     admin_cmd, adm_panel_callback, adm_stats_callback,
@@ -60,6 +61,7 @@ from handlers.admin_handlers import (
     addanimal_cmd, delanimal_cmd, listanimals_cmd,
     addcrop_cmd, delcrop_cmd, listcrops_cmd,
     addrecipe_cmd, delrecipe_cmd, listrecipes_cmd,
+    addtitle_cmd, deltitle_cmd, listtitles_cmd, givetitle_cmd,
 )
 
 load_dotenv()
@@ -105,6 +107,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("items", items_cmd))
     app.add_handler(CommandHandler("gemshop", gemshop_cmd))
     app.add_handler(CommandHandler("redeem", redeem_cmd))
+    app.add_handler(CommandHandler("mytitles", mytitles_cmd))
 
     # Admin commands
     app.add_handler(CommandHandler("admin", admin_cmd))
@@ -127,6 +130,10 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("addrecipe", addrecipe_cmd))
     app.add_handler(CommandHandler("delrecipe", delrecipe_cmd))
     app.add_handler(CommandHandler("listrecipes", listrecipes_cmd))
+    app.add_handler(CommandHandler("addtitle", addtitle_cmd))
+    app.add_handler(CommandHandler("deltitle", deltitle_cmd))
+    app.add_handler(CommandHandler("listtitles", listtitles_cmd))
+    app.add_handler(CommandHandler("givetitle", givetitle_cmd))
     app.add_handler(CommandHandler("setphoto", setphoto_cmd))
     app.add_handler(CommandHandler("viewphoto", viewphoto_cmd))
     app.add_handler(CommandHandler("delphoto", delphoto_cmd))
@@ -237,6 +244,11 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(gemconfirm_callback, pattern=r"^gemconfirm_\d+$"))
     app.add_handler(CallbackQueryHandler(redeem_prompt_callback, pattern="^redeem_prompt$"))
 
+    # Title / Gelar cosmetic
+    app.add_handler(CallbackQueryHandler(mytitles_callback, pattern="^mytitles$"))
+    app.add_handler(CallbackQueryHandler(title_equip_callback, pattern=r"^title_eq_.+$"))
+    app.add_handler(CallbackQueryHandler(title_unequip_callback, pattern="^title_unequip$"))
+
     # Admin panel callbacks
     app.add_handler(CallbackQueryHandler(adm_panel_callback, pattern="^adm_panel$"))
     app.add_handler(CallbackQueryHandler(adm_stats_callback, pattern="^adm_stats$"))
@@ -295,6 +307,8 @@ def main():
         from game.custom_recipes import init_custom_recipes_table, load_custom_recipes
         await init_custom_recipes_table()
         await load_custom_recipes()
+        from game.titles import init_title_tables
+        await init_title_tables()
         logger.info("✅ Database initialized")
         admin_ids = get_admin_ids()
         if admin_ids:
