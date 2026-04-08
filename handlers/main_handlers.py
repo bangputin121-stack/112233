@@ -1,4 +1,4 @@
-# handlers/main_handlers.py - Core handlers for Harvest Kingdom
+# handlers/main_handlers.py - Core handlers for Greena Farm
 
 import json
 import logging
@@ -136,7 +136,7 @@ async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pass
 
     name = get_display_name(db_user)
-    welcome = await get_setting("welcome_message", "Selamat datang di Harvest Kingdom! 🌾👑")
+    welcome = await get_setting("welcome_message", "Selamat datang di Greena Farm! 🌾👑")
 
     text = (
         f"{welcome}\n\n"
