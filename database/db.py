@@ -1,4 +1,4 @@
-# database/db.py - Database manager for Harvest Kingdom
+# database/db.py - Database manager for Greena Farm
 
 import aiosqlite
 import json
@@ -7,7 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
-DB_PATH = os.getenv("DB_PATH", "harvest_kingdom.db")
+DB_PATH = os.getenv("DB_PATH", "green_farm.db")
 
 @asynccontextmanager
 async def get_db():
@@ -84,7 +84,7 @@ async def init_db():
         await db.execute("""INSERT OR IGNORE INTO game_settings (key, value) VALUES
             ('bonus_drop_rate','0.05'),('maintenance_mode','0'),
             ('double_xp','0'),('double_coins','0'),
-            ('welcome_message','Selamat datang di Harvest Kingdom! 🌾👑'),
+            ('welcome_message','Selamat datang di Greena Farm! 🌾👑'),
             ('max_market_listings','5'),('max_market_price','9999999')""")
         # Migration: add display_name column if not exists
         try:
