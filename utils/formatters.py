@@ -200,10 +200,13 @@ def fmt_profile(user: dict) -> str:
     silo_used = sum(silo.values())
     barn_used = sum(barn.values())
 
+    title_display = user.get("_title_display", "")
+    title_line = f"🎭 「 {title_display} 」\n" if title_display else ""
+
     lines = [
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📊 **Profil — {name}**",
-        f"━━━━━━━━━━━━━━━━━━━━",
+        f"{title_line}━━━━━━━━━━━━━━━━━━━━",
         f"🪪 ID: `{user['user_id']}`{rank_text}",
         "",
         f"👑 **Level {level}**",
