@@ -522,15 +522,14 @@ async def adm_logs_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not logs:
         text = "📋 Belum ada aksi admin yang tercatat."
     else:
-        lines = ["📋 **Aksi Admin Terbaru:**\n"]
+        lines = ["📋 Aksi Admin Terbaru:\n"]
         for log in logs:
             lines.append(f"• [{log['created_at'][:16]}] Admin {log['admin_id']} → {log['action']} on {log['target_id']}: {log['details']}")
         text = "\n".join(lines)
 
     await query.edit_message_text(
         text[:4000],
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")]]),
-        parse_mode=ParseMode.MARKDOWN
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")]])
     )
 
 
@@ -1486,3 +1485,154 @@ async def listrecipes_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(text) > 4000:
         text = text[:3990] + "\n_(dipotong)_"
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+# ─── ADMIN: TITLE / GELAR COSMETIC ───────────────────────────────────────────
+
+@admin_only
+async def addtitle_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Format:
+    /addtitle <key> | <Display Text> | <Deskripsi>
+    
+    Contoh:
+    /addtitle petani_emas | 👑 Petani Emas | Gelar eksklusif VIP
+    /addtitle juragan | 💼 Juragan | Title untuk player sukses
+    /addtitle legenda | 🏆 Legenda Greena | Top player lifetime
+    """
+    raw = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "**Cara pakai:**\n"
+            "`/addtitle <key> | <Display Text> | <Deskripsi>`\n\n"
+            "**Penjelasan:**\n"
+            "• `key` — ID unik (huruf kecil, no spasi)\n"
+            "• `Display Text` — teks gelar yang muncul di profil (boleh pake emoji)\n"
+            "• `Deskripsi` — penjelasan singkat\n\n"
+            "**Contoh:**\n"
+            "`/addtitle petani_emas | 👑 Petani Emas | Gelar eksklusif VIP`\n"
+            "`/addtitle juragan | 💼 Juragan | Title untuk player sukses`\n"
+            "`/addtitle legenda | 🏆 Legenda Greena | Top player lifetime`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    body = parts[1]
+    pipe_parts = [p.strip() for p in body.split("|")]
+    if len(pipe_parts) < 2:
+        await update.message.reply_text(
+            "❌ Format salah. Pakai `|` buat pisah key, display, dan deskripsi.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    title_key = pipe_parts[0].split()[0] if pipe_parts[0] else ""
+    display = pipe_parts[1]
+    description = pipe_parts[2] if len(pipe_parts) > 2 else ""
+
+    if not title_key or not display:
+        await update.message.reply_text("❌ Key dan display text wajib diisi.")
+        return
+
+    from game.titles import add_title
+    ok, msg = await add_title(title_key, display, description,
+                               update.effective_user.id)
+    if ok:
+        await log_admin_action(update.effective_user.id, "add_title",
+                               details=f"{title_key}:{display}")
+        await update.message.reply_text(
+            f"✅ **Title ditambahkan!**\n\n"
+            f"Key: `{title_key}`\n"
+            f"Display: {display}\n"
+            f"Deskripsi: _{description or '-'}_\n\n"
+            f"Cara kasih ke player:\n"
+            f"1. Jual di toko permata: `/addgemitem <harga> title {title_key} 🎭 | Nama | Desc`\n"
+            f"2. Kasih langsung: `/givetitle <user_id> {title_key}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def deltitle_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if not args:
+        await update.message.reply_text("Cara pakai: `/deltitle <key>`",
+                                        parse_mode=ParseMode.MARKDOWN)
+        return
+    from game.titles import delete_title
+    ok = await delete_title(args[0])
+    if ok:
+        await log_admin_action(update.effective_user.id, "del_title", details=args[0])
+        await update.message.reply_text(
+            f"✅ Title `{args[0]}` dihapus.\n"
+            f"_(Semua user yang punya title ini otomatis ke-unequip)_",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text(f"❌ Title `{args[0]}` tidak ditemukan.",
+                                        parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def listtitles_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    from game.titles import list_all_titles
+    titles = await list_all_titles()
+    if not titles:
+        await update.message.reply_text(
+            "📭 Belum ada title.\n\nBikin pake `/addtitle`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    lines = ["🎭 **DAFTAR TITLE / GELAR**\n━━━━━━━━━━━━━━━━━━━━\n"]
+    for t in titles:
+        lines.append(
+            f"`{t['title_key']}` — {t['display']}\n"
+            f"  _{t['description'] or '-'}_\n"
+        )
+    lines.append("\n**Command:**")
+    lines.append("`/addtitle` — tambah title")
+    lines.append("`/deltitle <key>` — hapus title")
+    lines.append("`/givetitle <user_id> <key>` — kasih title langsung")
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3990] + "\n_(dipotong)_"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def givetitle_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    args = ctx.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Cara pakai: `/givetitle <user_id> <title_key>`\n"
+            "Contoh: `/givetitle 123456789 petani_emas`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ user_id harus angka.")
+        return
+    title_key = args[1]
+
+    from game.titles import give_title_to_user
+    ok, msg = await give_title_to_user(target_id, title_key)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    if ok:
+        await log_admin_action(update.effective_user.id, "give_title",
+                               target_id, title_key)
+        try:
+            from game.titles import get_title
+            title = await get_title(title_key)
+            await ctx.bot.send_message(
+                target_id,
+                f"🎭 Selamat! Admin memberimu gelar **{title['display']}**\n\n"
+                f"Buka `/mytitles` buat pasang gelar kamu.",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
