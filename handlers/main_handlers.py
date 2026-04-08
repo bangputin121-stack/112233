@@ -1136,6 +1136,9 @@ async def profile_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if u["user_id"] == user.id:
             db_user["rank"] = i + 1
             break
+    # Get equipped title
+    from game.titles import get_equipped_title_display
+    db_user["_title_display"] = await get_equipped_title_display(user.id)
     text = fmt_profile(db_user)
     avatar = await get_avatar(user.id)
     if avatar:
@@ -1151,6 +1154,8 @@ async def profile_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if u["user_id"] == user.id:
             db_user["rank"] = i + 1
             break
+    from game.titles import get_equipped_title_display
+    db_user["_title_display"] = await get_equipped_title_display(user.id)
     text = fmt_profile(db_user)
     avatar = await get_avatar(user.id)
     if avatar:
@@ -1555,3 +1560,88 @@ async def redeem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from game.gems import redeem_code as redeem_event_code
     ok, msg = await redeem_event_code(user.id, args[0])
     await safe_send(update, msg)
+
+
+# ─── TITLE / GELAR (Player Side) ─────────────────────────────────────────────
+
+async def _render_mytitles(user_id: int, extra_msg: str = "") -> tuple[str, InlineKeyboardMarkup]:
+    from game.titles import get_user_titles, get_equipped_title_display
+    owned = await get_user_titles(user_id)
+    equipped = await get_equipped_title_display(user_id)
+
+    text = (
+        f"🎭 **GELAR KAMU**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+    )
+    if equipped:
+        text += f"👤 Sedang dipakai: **{equipped}**\n\n"
+    else:
+        text += f"👤 Sedang dipakai: _tidak ada_\n\n"
+
+    if extra_msg:
+        text += extra_msg + "\n\n"
+
+    if not owned:
+        text += (
+            "📭 Kamu belum punya gelar.\n\n"
+            "Cara dapetin:\n"
+            "• Beli di 💎 Toko Permata\n"
+            "• Reward event spesial dari admin\n"
+            "• Achievement khusus"
+        )
+    else:
+        text += f"**Koleksi kamu** ({len(owned)}):\n\n"
+        for t in owned:
+            text += f"• {t['display']}\n"
+            if t['description']:
+                text += f"  _{t['description']}_\n"
+            text += "\n"
+        text += "Tap tombol di bawah buat pasang / lepas gelar:"
+
+    buttons = []
+    for t in owned:
+        label = f"✨ Pakai: {t['display']}"
+        buttons.append([InlineKeyboardButton(label[:55], callback_data=f"title_eq_{t['title_key']}")])
+    if owned and equipped:
+        buttons.append([InlineKeyboardButton("❌ Lepas Gelar", callback_data="title_unequip")])
+    buttons.append([InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")])
+    return text, InlineKeyboardMarkup(buttons)
+
+
+async def mytitles_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    text, kb = await _render_mytitles(user.id)
+    await safe_send(update, text, kb)
+
+
+async def mytitles_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    text, kb = await _render_mytitles(user.id)
+    await safe_edit(query, text, kb)
+
+
+async def title_equip_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    title_key = "_".join(query.data.split("_")[2:])
+    user = query.from_user
+    from game.titles import equip_title
+    ok, msg = await equip_title(user.id, title_key)
+    await query.answer(msg, show_alert=True)
+    text, kb = await _render_mytitles(user.id, extra_msg=msg if ok else "")
+    await safe_edit(query, text, kb)
+
+
+async def title_unequip_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    from game.titles import equip_title
+    ok, msg = await equip_title(user.id, "")
+    await query.answer(msg, show_alert=True)
+    text, kb = await _render_mytitles(user.id, extra_msg=msg if ok else "")
+    await safe_edit(query, text, kb)
