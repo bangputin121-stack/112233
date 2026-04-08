@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - Harvest Kingdom Bot Entry Point
+# main.py - Greena Farm Bot Entry Point
 
 import os
 import logging
@@ -324,7 +324,7 @@ def main():
     )
 
     register_handlers(app)
-    logger.info("🌾 Harvest Kingdom Bot starting...")
+    logger.info("🌾 Greena Farm Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
