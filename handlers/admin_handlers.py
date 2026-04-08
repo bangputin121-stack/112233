@@ -200,7 +200,7 @@ async def adm_toggle_setting(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif action == "adm_set_maxprice":
         ctx.user_data["adm_action"] = "set_maxprice"
-        cur = await get_setting("max_market_price", "9999")
+        cur = await get_setting("max_market_price", "9999999")
         await query.edit_message_text(
             f"🏪 Harga maks saat ini: Rp{cur}\n\nKirim harga maks baru:",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_settings")]]),
@@ -303,7 +303,7 @@ async def adm_text_input(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         failed = 0
         for uid in user_ids:
             try:
-                await ctx.bot.send_message(uid, f"📢 **Admin Announcement**\n\n{msg_text}", parse_mode=ParseMode.MARKDOWN)
+                await ctx.bot.send_message(uid, f"📢 Admin Announcement\n\n{msg_text}")
                 sent += 1
             except Exception:
                 failed += 1
@@ -539,25 +539,23 @@ async def adm_logs_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def adm_items_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    lines = ["🌾 **Tanaman di Database:**\n"]
+    lines = ["🌾 Tanaman di Database:\n"]
     for k, v in CROPS.items():
-        lines.append(f"{v['emoji']} {v['name']} (key:`{k}`) Lv{v['level_req']} | {v['grow_time']}s | Rp{v['sell_price']}")
+        lines.append(f"{v['emoji']} {v['name']} (key: {k}) Lv{v['level_req']} | {v['grow_time']}s | Rp{v['sell_price']}")
+    lines.append("\n💡 Buat tambah tanaman baru permanen, pake command /addcrop")
 
     buttons = [
-        [InlineKeyboardButton("➕ Tambah Tanaman (runtime)", callback_data="adm_addcrop")],
         [InlineKeyboardButton("⬅️ Kembali", callback_data="adm_panel")],
     ]
-    await query.edit_message_text("\n".join(lines)[:4000], reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
+    await query.edit_message_text("\n".join(lines)[:4000], reply_markup=InlineKeyboardMarkup(buttons))
 
 @admin_only
 async def adm_addcrop_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """DEPRECATED — replaced by /addcrop command. Kept for backward compat."""
     query = update.callback_query
-    await query.answer()
-    ctx.user_data["adm_action"] = "add_item_db"
-    await query.edit_message_text(
-        "➕ **Tambah Tanaman (runtime saja)**\n\nKirim dengan format:\n`key,name,emoji,grow_time_secs,sell_price,xp,level_req,seed_cost`\n\nExample:\n`mango,Mango,🥭,7200,200,12,14,160`",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Batal", callback_data="adm_items")]]),
-        parse_mode=ParseMode.MARKDOWN
+    await query.answer(
+        "⚠️ Fitur lama. Pake command /addcrop biar tanaman persist di database!",
+        show_alert=True
     )
 
 
