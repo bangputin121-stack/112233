@@ -1306,14 +1306,25 @@ async def user_text_input(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def daily_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     await get_or_create_user(user.id, user.username, user.first_name)
     ok, msg = await claim_daily(user.id)
+    # Satu kali answer — show popup alert dengan hasil (bukan 2x kayak dulu)
     await query.answer(msg, show_alert=True)
+    # Refresh menu utama biar saldo baru keliatan
     if ok:
-        db_user = await get_user_full(user.id)
-        await safe_edit(query, fmt_profile(db_user), profile_keyboard())
+        db_user = await get_or_create_user(user.id, user.username, user.first_name)
+        name = get_display_name(db_user)
+        text = (
+            f"🏠 **Menu Utama**\n"
+            f"👑 Level {db_user['level']}  💵 Rp{db_user['coins']:,}  💎 {db_user['gems']}\n\n"
+            f"🎁 +Rp{(10000 + db_user['level']*1000):,} bonus harian masuk!\n"
+            f"Mau ngapain lagi, **{name}**?"
+        )
+        try:
+            await safe_edit(query, text, main_menu_keyboard())
+        except Exception:
+            pass
 
 async def daily_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
