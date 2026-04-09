@@ -753,6 +753,163 @@ async def delphoto_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     name = get_item_name(item_key)
     await update.message.reply_text(f"✅ Foto {emoji} **{name}** (`{item_key}`) berhasil dihapus.", parse_mode=ParseMode.MARKDOWN)
 
+
+# ─── SET GIF (Admin: reply GIF + /setgif item_key) ──────────────────────────
+# Buat item rare/spesial yang lu mau punya animasi gerak
+
+@admin_only
+async def setgif_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin replies to a GIF/animation with /setgif <item_key>."""
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "🎞️ **Set GIF Item Rare**\n\n"
+            "Cara pakai: Reply GIF/animasi dengan:\n"
+            "`/setgif <item_key>`\n\n"
+            "Contoh: `/setgif strawberry`\n\n"
+            "💡 Tip: GIF cocok buat item rare/legendary biar keliatan istimewa.\n"
+            "Kalau item punya GIF dan foto, GIF yang dipake.\n\n"
+            "Lihat semua item ber-GIF: `/viewgif`\n"
+            "Hapus GIF: `/delgif <item_key>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    item_key = args[0].lower()
+
+    # Validate item exists (sama kayak setphoto)
+    all_keys = (
+        list(CROPS.keys()) + list(UPGRADE_TOOLS.keys()) +
+        list(EXPANSION_TOOLS.keys()) + list(CLEARING_TOOLS.keys())
+    )
+    for bld in BUILDINGS.values():
+        all_keys.extend(bld["recipes"].keys())
+
+    if item_key not in all_keys:
+        await update.message.reply_text(
+            f"❌ Item `{item_key}` tidak ditemukan.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    # Check if reply to GIF/animation
+    reply = update.message.reply_to_message
+    if not reply or not reply.animation:
+        await update.message.reply_text(
+            "❌ Reply ke sebuah GIF/animasi dulu, baru ketik `/setgif <item_key>`\n\n"
+            "_Note: Foto biasa pake `/setphoto`. GIF/animasi pake `/setgif`._",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    file_id = reply.animation.file_id
+
+    # Store as gif_<key> in game_settings
+    await set_setting(f"gif_{item_key}", file_id)
+    await log_admin_action(
+        update.effective_user.id, "set_gif",
+        details=f"{item_key}={file_id[:20]}..."
+    )
+
+    from game.data import get_item_name, get_item_emoji
+    emoji = get_item_emoji(item_key)
+    name = get_item_name(item_key)
+    await update.message.reply_text(
+        f"✅ GIF untuk {emoji} **{name}** (`{item_key}`) berhasil di-set!\n"
+        f"🎞️ Item ini sekarang tampil dengan animasi gerak.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
+@admin_only
+async def viewgif_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin checks which items have GIFs set."""
+    args = ctx.args
+    if args:
+        # View specific item GIF
+        item_key = args[0].lower()
+        gif_id = await get_setting(f"gif_{item_key}")
+        if gif_id:
+            from game.data import get_item_name, get_item_emoji
+            emoji = get_item_emoji(item_key)
+            name = get_item_name(item_key)
+            try:
+                await update.message.reply_animation(
+                    animation=gif_id,
+                    caption=f"{emoji} **{name}** (`{item_key}`)\n✅ GIF sudah di-set",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                await update.message.reply_text(f"❌ Gagal load GIF: {e}")
+        else:
+            await update.message.reply_text(
+                f"❌ Item `{item_key}` belum ada GIF.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        return
+
+    # List all items with GIFs
+    async with get_db() as db:
+        rows = await fetchall(db, "SELECT key, value FROM game_settings WHERE key LIKE 'gif_%'")
+        gifs = [dict(r) for r in rows]
+
+    if not gifs:
+        await update.message.reply_text(
+            "🎞️ Belum ada item ber-GIF.\n\n"
+            "Gunakan: Reply GIF + `/setgif <item_key>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    from game.data import get_item_name, get_item_emoji
+    lines = ["🎞️ **Item dengan GIF (Rare):**\n"]
+    for g in gifs:
+        item_key = g["key"].replace("gif_", "")
+        emoji = get_item_emoji(item_key)
+        name = get_item_name(item_key)
+        lines.append(f"✨ {emoji} {name} (`{item_key}`)")
+
+    lines.append(f"\nTotal: {len(gifs)} item rare")
+    lines.append("\nLihat GIF: `/viewgif <item_key>`")
+    lines.append("Hapus GIF: `/delgif <item_key>`")
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+@admin_only
+async def delgif_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin deletes a GIF for an item."""
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "Cara pakai: `/delgif <item_key>`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    item_key = args[0].lower()
+    gif_id = await get_setting(f"gif_{item_key}")
+    if not gif_id:
+        await update.message.reply_text(
+            f"❌ Item `{item_key}` tidak punya GIF.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    async with get_db() as db:
+        await db.execute("DELETE FROM game_settings WHERE key = ?", (f"gif_{item_key}",))
+        await db.commit()
+
+    await log_admin_action(update.effective_user.id, "del_gif", details=item_key)
+    from game.data import get_item_name, get_item_emoji
+    emoji = get_item_emoji(item_key)
+    name = get_item_name(item_key)
+    await update.message.reply_text(
+        f"✅ GIF {emoji} **{name}** (`{item_key}`) berhasil dihapus.\n"
+        f"_(Foto biasa, kalo ada, masih kepake)_",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+
 @admin_only
 async def users_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Admin command to list all users."""
@@ -882,10 +1039,12 @@ async def addgemitem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "**Type tersedia:**\n"
             "• `coins` — value = jumlah Rp (cth: `100000`)\n"
             "• `item` — value = `item_key:qty` (cth: `wheat:50`)\n"
+            "• `title` — value = `title_key` (otomatis kirim gelar ke pembeli)\n"
             "• `custom` — value = label, admin proses manual\n\n"
             "**Contoh:**\n"
             "`/addgemitem 50 coins 100000 💰 | Bonus 100rb | Saldo Rp100.000`\n"
             "`/addgemitem 30 item wheat:50 🌾 | Paket Wheat | 50 biji wheat`\n"
+            "`/addgemitem 100 title petani_emas 🎭 | Title Petani Emas | Gelar VIP`\n"
             "`/addgemitem 100 custom skin_emas 👑 | Skin Emas | Diproses manual`",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -910,8 +1069,8 @@ async def addgemitem_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Harga harus angka.")
         return
     rtype = head[1].lower()
-    if rtype not in ("coins", "item", "custom"):
-        await update.message.reply_text("❌ Type harus: `coins`, `item`, atau `custom`.",
+    if rtype not in ("coins", "item", "custom", "title"):
+        await update.message.reply_text("❌ Type harus: `coins`, `item`, `custom`, atau `title`.",
                                         parse_mode=ParseMode.MARKDOWN)
         return
     rvalue = head[2]
