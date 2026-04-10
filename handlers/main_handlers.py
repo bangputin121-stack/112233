@@ -509,9 +509,20 @@ async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 async def produce_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("_")
-    building_key = parts[1]
-    recipe_key = "_".join(parts[2:])
+    # Format: produce_<building_key>_<recipe_key>
+    # Building key bisa multi-word (feed_mill, textile_mill), jadi nggak bisa split simple
+    payload = query.data[len("produce_"):]
+    from game.data import BUILDINGS
+    building_key = None
+    recipe_key = None
+    for bk in BUILDINGS.keys():
+        if payload.startswith(bk + "_"):
+            building_key = bk
+            recipe_key = payload[len(bk) + 1:]
+            break
+    if not building_key:
+        await query.answer("❌ Bangunan tidak dikenali", show_alert=True)
+        return
     user = query.from_user
     ok, msg = await start_production(user.id, building_key, recipe_key)
     if ok:
@@ -524,9 +535,23 @@ async def produce_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    parts = query.data.split("_")
-    building_key = parts[1]
-    slot = int(parts[2])
+    # Format: collect_<building_key>_<slot>
+    # Building key bisa multi-word, jadi parsing dari belakang: slot pasti angka di akhir
+    payload = query.data[len("collect_"):]
+    from game.data import BUILDINGS
+    building_key = None
+    slot = None
+    for bk in BUILDINGS.keys():
+        if payload.startswith(bk + "_"):
+            try:
+                slot = int(payload[len(bk) + 1:])
+                building_key = bk
+                break
+            except ValueError:
+                continue
+    if building_key is None or slot is None:
+        await query.answer("❌ Bangunan tidak dikenali", show_alert=True)
+        return
     user = query.from_user
     ok, msg = await collect_production(user.id, building_key, slot)
     if ok:
