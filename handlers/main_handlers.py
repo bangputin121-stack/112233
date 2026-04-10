@@ -60,55 +60,92 @@ async def safe_send(update: Update, text: str, keyboard=None):
     except Exception as e:
         logger.error(f"safe_send failed: {e}")
 
-async def get_item_photo(item_key: str) -> str | None:
-    """Get photo file_id for an item from game_settings."""
+async def get_item_photo(item_key: str):
+    """Get media (GIF priority, then photo) for an item.
+    Returns dict {kind, file_id} or None."""
+    gif_id = await get_setting(f"gif_{item_key}")
+    if gif_id:
+        return {"kind": "animation", "file_id": gif_id}
     photo_id = await get_setting(f"photo_{item_key}")
-    return photo_id if photo_id else None
+    if photo_id:
+        return {"kind": "photo", "file_id": photo_id}
+    return None
 
-async def safe_send_photo(target, text: str, keyboard=None, photo_id: str = None):
-    """Send photo with caption, fallback to text if no photo or error."""
+async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
+    """Send photo/animation with caption.
+
+    PERILAKU BARU: kalau dipanggil dari callback query, EDIT pesan asli pake
+    edit_message_media (kalau pesan asalnya udah punya media) atau edit_message_caption
+    (kalau pesan asalnya teks). Fallback: edit jadi text, atau hapus+kirim baru.
+
+    photo_id bisa berupa string (legacy = photo) atau dict {kind, file_id} (baru, support GIF).
+    """
     if not photo_id:
-        # No photo, send as text
+        # No media, edit teks aja
         if hasattr(target, "edit_message_text"):
             await safe_edit(target, text, keyboard)
         elif hasattr(target, "message") and target.message:
             await safe_send(target, text, keyboard)
         return
 
-    try:
-        if hasattr(target, "message") and target.message:
-            # From callback query — delete old message, send new photo
-            chat_id = target.message.chat_id
+    # Normalize media format
+    if isinstance(photo_id, str):
+        media = {"kind": "photo", "file_id": photo_id}
+    else:
+        media = photo_id
+    kind = media["kind"]
+    file_id = media["file_id"]
+
+    # Pesan dari callback query → coba EDIT, jangan delete+send
+    if hasattr(target, "message") and target.message:
+        from telegram import InputMediaPhoto, InputMediaAnimation
+        msg_obj = target.message
+        try:
+            # Coba edit_message_media kalau pesan asal udah punya media
+            if msg_obj.photo or msg_obj.animation or msg_obj.video:
+                if kind == "animation":
+                    new_media = InputMediaAnimation(
+                        media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
+                    )
+                else:
+                    new_media = InputMediaPhoto(
+                        media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
+                    )
+                await msg_obj.edit_media(media=new_media, reply_markup=keyboard)
+                return
+            else:
+                # Pesan asal teks, nggak bisa convert ke media via edit
+                # → edit caption-nya jadi text doang (anti-spam)
+                await safe_edit(target, text, keyboard)
+                return
+        except Exception as e:
+            logger.error(f"safe_send_photo edit failed: {e}, falling back to text edit")
             try:
-                await target.message.delete()
+                await safe_edit(target, text, keyboard)
+                return
             except Exception:
                 pass
-            await target.message.get_bot().send_photo(
-                chat_id=chat_id,
-                photo=photo_id,
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.MARKDOWN
+
+    # Bukan dari callback (rare path) — kirim baru
+    try:
+        if kind == "animation":
+            await target.message.reply_animation(
+                animation=file_id, caption=text,
+                reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
             )
         else:
-            # From update.message
             await target.message.reply_photo(
-                photo=photo_id,
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.MARKDOWN
+                photo=file_id, caption=text,
+                reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
             )
     except Exception as e:
-        logger.error(f"safe_send_photo failed: {e}, falling back to text")
-        if hasattr(target, "edit_message_text"):
-            await safe_edit(target, text, keyboard)
-        elif hasattr(target, "message") and target.message:
-            try:
-                await target.message.reply_text(
-                    text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
-                )
-            except Exception:
-                pass
+        logger.error(f"safe_send_photo final fallback failed: {e}")
+        try:
+            await target.message.reply_text(
+                text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
 
 
 # ─── START / MENU ─────────────────────────────────────────────────────────────
@@ -279,7 +316,6 @@ async def harvest_all_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def expand_farm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     ok, msg = await expand_farm(user.id)
     await query.answer(msg, show_alert=True)
@@ -325,7 +361,6 @@ async def spray_all_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def fertilize_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     from game.engine import get_item_count
     fert_count = await get_item_count(user.id, "fertilizer")
@@ -442,7 +477,6 @@ async def pen_collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def expand_pens_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     ok, msg = await expand_animal_pens(user.id)
     await query.answer(msg, show_alert=True)
@@ -508,7 +542,6 @@ async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 
 async def produce_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     # Format: produce_<building_key>_<recipe_key>
     # Building key bisa multi-word (feed_mill, textile_mill), jadi nggak bisa split simple
     payload = query.data[len("produce_"):]
@@ -534,7 +567,6 @@ async def produce_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     # Format: collect_<building_key>_<slot>
     # Building key bisa multi-word, jadi parsing dari belakang: slot pasti angka di akhir
     payload = query.data[len("collect_"):]
@@ -615,7 +647,6 @@ async def storage_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def sell_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     item_key = "_".join(query.data.split("_")[2:])
     user = query.from_user
     qty = await get_item_count(user.id, item_key)
@@ -646,7 +677,6 @@ async def sell_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def sell_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("_")
     item_key = "_".join(parts[1:-1])
     qty = int(parts[-1])
@@ -667,7 +697,6 @@ async def sell_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def upgrade_silo_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     ok, msg = await upgrade_silo(user.id)
     await query.answer(msg, show_alert=True)
@@ -682,7 +711,6 @@ async def upgrade_silo_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def upgrade_barn_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     ok, msg = await upgrade_barn(user.id)
     await query.answer(msg, show_alert=True)
@@ -790,7 +818,6 @@ async def market_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def mkt_buy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     listing_id = int(query.data.split("_")[2])
     user = query.from_user
     await get_or_create_user(user.id, user.username, user.first_name)
@@ -877,7 +904,6 @@ async def listing_sold_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def rmlist_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     listing_id = int(query.data.split("_")[1])
     user = query.from_user
     ok, msg = await remove_market_listing(user.id, listing_id)
@@ -1124,7 +1150,6 @@ async def land_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def clear_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     slot = int(query.data.split("_")[1])
     user = query.from_user
     ok, msg = await clear_obstacle(user.id, slot)
@@ -1389,7 +1414,6 @@ async def shop_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def shopbuy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     tool_key = query.data.split("_", 1)[1]
     user = query.from_user
     await get_or_create_user(user.id, user.username, user.first_name)
@@ -1502,7 +1526,6 @@ async def gemshop_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def gembuy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     item_id = int(query.data.split("_")[1])
     user = query.from_user
     from game.gems import get_gem_item
@@ -1532,7 +1555,6 @@ async def gembuy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def gemconfirm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     item_id = int(query.data.split("_")[1])
     user = query.from_user
     from game.gems import buy_gem_item
@@ -1662,7 +1684,6 @@ async def mytitles_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def title_equip_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     title_key = "_".join(query.data.split("_")[2:])
     user = query.from_user
     from game.titles import equip_title
@@ -1674,7 +1695,6 @@ async def title_equip_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def title_unequip_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     from game.titles import equip_title
     ok, msg = await equip_title(user.id, "")
