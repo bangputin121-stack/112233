@@ -54,6 +54,7 @@ from handlers.admin_handlers import (
     adm_items_callback, adm_addcrop_callback,
     adm_give_callback, adm_text_input,
     give_cmd, givecoins_cmd, setphoto_cmd, viewphoto_cmd, delphoto_cmd,
+    setgif_cmd, viewgif_cmd, delgif_cmd,
     setchannel_cmd, users_cmd,
     get_admin_ids,
     givegems_cmd, addgemitem_cmd, delgemitem_cmd, togglegemitem_cmd,
@@ -62,6 +63,7 @@ from handlers.admin_handlers import (
     addcrop_cmd, delcrop_cmd, listcrops_cmd,
     addrecipe_cmd, delrecipe_cmd, listrecipes_cmd,
     addtitle_cmd, deltitle_cmd, listtitles_cmd, givetitle_cmd,
+    resetuser_cmd, resetall_cmd,
 )
 
 load_dotenv()
@@ -137,8 +139,13 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("setphoto", setphoto_cmd))
     app.add_handler(CommandHandler("viewphoto", viewphoto_cmd))
     app.add_handler(CommandHandler("delphoto", delphoto_cmd))
+    app.add_handler(CommandHandler("setgif", setgif_cmd))
+    app.add_handler(CommandHandler("viewgif", viewgif_cmd))
+    app.add_handler(CommandHandler("delgif", delgif_cmd))
     app.add_handler(CommandHandler("setchannel", setchannel_cmd))
     app.add_handler(CommandHandler("users", users_cmd))
+    app.add_handler(CommandHandler("resetuser", resetuser_cmd))
+    app.add_handler(CommandHandler("resetall", resetall_cmd))
 
     # ─── ADMIN TEXT INPUT (must be before generic message handler) ─────────────
     admin_ids = get_admin_ids()
