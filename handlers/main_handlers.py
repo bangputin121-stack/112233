@@ -35,21 +35,35 @@ from database.db import parse_json_field
 
 logger = logging.getLogger(__name__)
 
-# Safe edit/send helpers
+# Safe edit/send helpers — anti-spam, ALWAYS edit, never spam reply
 async def safe_edit(query, text: str, keyboard=None, parse_mode=ParseMode.MARKDOWN):
+    """Edit pesan dari callback. Pinter handle media vs text:
+    - Pesan teks → edit_message_text
+    - Pesan punya media (foto/gif) → edit_message_caption (text di caption)
+    JANGAN pernah spam reply_text — kalau gagal, tuliskan log doang.
+    """
+    msg = query.message if hasattr(query, "message") else None
+    has_media = bool(msg and (msg.photo or msg.animation or msg.video or msg.document))
+
     try:
-        await query.edit_message_text(
-            text, reply_markup=keyboard, parse_mode=parse_mode,
-            disable_web_page_preview=True
-        )
-    except Exception:
-        try:
-            await query.message.reply_text(
+        if has_media:
+            # Pesan punya media — edit caption-nya, JANGAN pake edit_message_text
+            await query.edit_message_caption(
+                caption=text, reply_markup=keyboard, parse_mode=parse_mode
+            )
+        else:
+            # Pesan teks biasa
+            await query.edit_message_text(
                 text, reply_markup=keyboard, parse_mode=parse_mode,
                 disable_web_page_preview=True
             )
-        except Exception as e:
-            logger.error(f"safe_edit failed: {e}")
+        return
+    except Exception as e:
+        # Telegram lemparan "Message is not modified" itu normal — abaikan
+        if "not modified" in str(e).lower():
+            return
+        logger.error(f"safe_edit failed (no fallback to reply_text): {e}")
+        # NO FALLBACK ke reply_text — biar nggak spam chat
 
 async def safe_send(update: Update, text: str, keyboard=None):
     try:
@@ -72,20 +86,18 @@ async def get_item_photo(item_key: str):
     return None
 
 async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
-    """Send photo/animation with caption.
+    """Send/edit photo or animation with caption. Anti-spam.
 
-    PERILAKU BARU: kalau dipanggil dari callback query, EDIT pesan asli pake
-    edit_message_media (kalau pesan asalnya udah punya media) atau edit_message_caption
-    (kalau pesan asalnya teks). Fallback: edit jadi text, atau hapus+kirim baru.
+    Strategi:
+    - Pesan asal udah ada media → edit_media (replace foto in-place, no new msg)
+    - Pesan asal teks → delete + send media (sekali aja, transition text→media)
+    - Setelah pesan jadi media, call safe_edit selanjutnya pake edit_caption → no spam.
 
-    photo_id bisa berupa string (legacy = photo) atau dict {kind, file_id} (baru, support GIF).
+    photo_id bisa string (legacy = photo) atau dict {kind, file_id} (support GIF).
     """
     if not photo_id:
         # No media, edit teks aja
-        if hasattr(target, "edit_message_text"):
-            await safe_edit(target, text, keyboard)
-        elif hasattr(target, "message") and target.message:
-            await safe_send(target, text, keyboard)
+        await safe_edit(target, text, keyboard)
         return
 
     # Normalize media format
@@ -96,78 +108,66 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
     kind = media["kind"]
     file_id = media["file_id"]
 
-    # Pesan dari callback query
-    if hasattr(target, "message") and target.message:
-        from telegram import InputMediaPhoto, InputMediaAnimation
-        msg_obj = target.message
-        bot = msg_obj.get_bot()
-        chat_id = msg_obj.chat_id
+    msg_obj = target.message if hasattr(target, "message") else None
+    if not msg_obj:
+        return
 
-        # Case 1: Pesan asal udah punya media → edit_media (no spam)
-        if msg_obj.photo or msg_obj.animation or msg_obj.video:
-            try:
-                if kind == "animation":
-                    new_media = InputMediaAnimation(
-                        media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
-                    )
-                else:
-                    new_media = InputMediaPhoto(
-                        media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
-                    )
-                await msg_obj.edit_media(media=new_media, reply_markup=keyboard)
-                return
-            except Exception as e:
-                logger.error(f"edit_media failed: {e}")
+    from telegram import InputMediaPhoto, InputMediaAnimation
+    has_media = bool(msg_obj.photo or msg_obj.animation or msg_obj.video)
 
-        # Case 2: Pesan asal teks → harus delete + send (sekali aja)
-        # Setelah ini, pesan udah jadi media, jadi next call bakal pake edit_media
-        try:
-            await msg_obj.delete()
-        except Exception:
-            pass
+    # Case 1: Pesan asal udah ada media → edit_media (NO SPAM)
+    if has_media:
         try:
             if kind == "animation":
-                await bot.send_animation(
-                    chat_id=chat_id, animation=file_id, caption=text,
-                    reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                new_media = InputMediaAnimation(
+                    media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
                 )
             else:
-                await bot.send_photo(
-                    chat_id=chat_id, photo=file_id, caption=text,
-                    reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                new_media = InputMediaPhoto(
+                    media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
                 )
+            await msg_obj.edit_media(media=new_media, reply_markup=keyboard)
             return
         except Exception as e:
-            logger.error(f"send media after delete failed: {e}")
+            if "not modified" in str(e).lower():
+                # Same media, just edit caption
+                try:
+                    await msg_obj.edit_caption(
+                        caption=text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    pass
+                return
+            logger.error(f"edit_media failed: {e}")
+            # Fall through to text edit (no spam)
             try:
-                await bot.send_message(
-                    chat_id=chat_id, text=text,
-                    reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                await msg_obj.edit_caption(
+                    caption=text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
                 )
             except Exception:
                 pass
             return
 
-    # Bukan dari callback (rare path) — kirim baru
+    # Case 2: Pesan asal teks → harus delete + send (sekali, transition)
+    bot = msg_obj.get_bot()
+    chat_id = msg_obj.chat_id
+    try:
+        await msg_obj.delete()
+    except Exception:
+        pass
     try:
         if kind == "animation":
-            await target.message.reply_animation(
-                animation=file_id, caption=text,
+            await bot.send_animation(
+                chat_id=chat_id, animation=file_id, caption=text,
                 reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
             )
         else:
-            await target.message.reply_photo(
-                photo=file_id, caption=text,
+            await bot.send_photo(
+                chat_id=chat_id, photo=file_id, caption=text,
                 reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
             )
     except Exception as e:
-        logger.error(f"safe_send_photo final fallback failed: {e}")
-        try:
-            await target.message.reply_text(
-                text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
-            )
-        except Exception:
-            pass
+        logger.error(f"send media after delete failed: {e}")
 
 
 # ─── START / MENU ─────────────────────────────────────────────────────────────
