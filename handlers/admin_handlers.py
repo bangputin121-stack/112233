@@ -1831,6 +1831,19 @@ async def _reset_user_data(user_id: int) -> bool:
         except Exception:
             pass
 
+        # Re-create starter rows kayak user baru daftar
+        # 8 plots kosong + 2 animal_pens kosong (sama kayak create_user)
+        for i in range(8):
+            await db.execute(
+                "INSERT INTO plots (user_id, slot, status) VALUES (?, ?, 'empty')",
+                (user_id, i)
+            )
+        for i in range(2):
+            await db.execute(
+                "INSERT INTO animal_pens (user_id, slot, status) VALUES (?, ?, 'empty')",
+                (user_id, i)
+            )
+
         # Reset row di users table ke default
         await db.execute("""
             UPDATE users SET
