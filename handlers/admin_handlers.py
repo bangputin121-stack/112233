@@ -487,10 +487,12 @@ async def adm_resetuser_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     target_id = int(query.data.split("_")[2])
-    await update_user(target_id, coins=50000, gems=5, xp=0, level=1,
-                      silo_items="{}", barn_items="{}", land_items="{}")
-    await log_admin_action(query.from_user.id, "reset_user", target_id)
-    await query.answer(f"✅ Pengguna {target_id} direset!", show_alert=True)
+    ok = await _reset_user_data(target_id)
+    if ok:
+        await log_admin_action(query.from_user.id, "reset_user_full", target_id, "via UI")
+        await query.answer(f"✅ Player {target_id} di-reset full ke nol!", show_alert=True)
+    else:
+        await query.answer(f"❌ Player {target_id} tidak ditemukan", show_alert=True)
 
 
 # ─── BROADCAST ────────────────────────────────────────────────────────────────
@@ -1793,3 +1795,200 @@ async def givetitle_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             pass
+
+
+# ─── RESET PLAYER DATA (Full Reset) ──────────────────────────────────────────
+
+async def _reset_user_data(user_id: int) -> bool:
+    """
+    Full reset 1 user balik ke kondisi awal (kayak baru /start).
+    Reset:
+    - coins (50k), gems (5), xp/level (0/1)
+    - plots/pens/buildings/orders/listings/obstacles → DELETE all
+    - silo/barn/land items → kosong {}
+    - title koleksi → DELETE all
+    - last_daily → null
+    - total_harvests/sales → 0
+    Disimpen:
+    - user_id, username, first_name, display_name, created_at
+    """
+    async with get_db() as db:
+        # Cek user ada
+        u = await fetchone(db, "SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        if not u:
+            return False
+
+        # Delete user-related rows dari semua tabel
+        await db.execute("DELETE FROM plots WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM animal_pens WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM buildings WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM orders WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM market_listings WHERE seller_id = ?", (user_id,))
+        await db.execute("DELETE FROM obstacles WHERE user_id = ?", (user_id,))
+        # Title koleksi (kalau tabel ada)
+        try:
+            await db.execute("DELETE FROM user_titles WHERE user_id = ?", (user_id,))
+        except Exception:
+            pass
+
+        # Reset row di users table ke default
+        await db.execute("""
+            UPDATE users SET
+                coins = 50000, gems = 5,
+                xp = 0, level = 1,
+                plots = 8, animal_pens = 2,
+                silo_cap = 100, barn_cap = 50,
+                silo_level = 1, barn_level = 1,
+                silo_items = '{}', barn_items = '{}', land_items = '{}',
+                last_daily = NULL,
+                total_harvests = 0, total_sales = 0,
+                equipped_title = ''
+            WHERE user_id = ?
+        """, (user_id,))
+        await db.commit()
+    return True
+
+
+@admin_only
+async def resetuser_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Reset 1 player ke nol (hard reset).
+    Format: /resetuser <user_id>
+    """
+    args = ctx.args
+    if not args:
+        await update.message.reply_text(
+            "🗑️ **Reset Player ke Nol**\n\n"
+            "Format: `/resetuser <user_id>`\n\n"
+            "Contoh: `/resetuser 123456789`\n\n"
+            "⚠️ **Yang di-reset:**\n"
+            "• Coins → Rp50.000\n"
+            "• Permata → 5\n"
+            "• Level/XP → Lv1, 0 XP\n"
+            "• Semua tanaman, hewan, pabrik → kosong\n"
+            "• Semua item gudang/lumbung → kosong\n"
+            "• Listing pasar, pesanan → dihapus\n"
+            "• Title koleksi → dihapus\n\n"
+            "✅ Yang DISIMPAN: nama, ID, username, tanggal join",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ user_id harus angka.")
+        return
+
+    ok = await _reset_user_data(target_id)
+    if not ok:
+        await update.message.reply_text(
+            f"❌ User `{target_id}` tidak ditemukan.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    await log_admin_action(update.effective_user.id, "reset_user_full",
+                           target_id, "full hard reset")
+    await update.message.reply_text(
+        f"✅ **Player `{target_id}` berhasil di-reset!**\n\n"
+        f"Semua progress dihapus, balik ke kondisi awal seperti baru daftar.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    # Notif ke player yang di-reset
+    try:
+        await ctx.bot.send_message(
+            target_id,
+            "⚠️ Akun kamu telah di-reset oleh admin.\n\n"
+            "Semua progress dihapus dan kamu mulai dari awal lagi.\n"
+            "Ketik /start untuk mulai bermain kembali."
+        )
+    except Exception:
+        pass
+
+
+@admin_only
+async def resetall_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    NUCLEAR OPTION — reset SEMUA player ke nol.
+    Butuh konfirmasi: /resetall CONFIRM
+    """
+    args = ctx.args
+
+    if not args or args[0] != "CONFIRM":
+        async with get_db() as db:
+            row = await fetchone(db, "SELECT COUNT(*) as c FROM users")
+            total = row["c"]
+
+        await update.message.reply_text(
+            "💀 **RESET SEMUA PLAYER**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⚠️ Ini akan **MERESET {total} PLAYER** ke kondisi awal!\n\n"
+            "**Yang dihapus untuk SEMUA player:**\n"
+            "• Semua coins, permata, XP, level\n"
+            "• Semua tanaman, hewan, pabrik\n"
+            "• Semua item gudang & lumbung\n"
+            "• Semua listing pasar, pesanan\n"
+            "• Semua title koleksi\n\n"
+            "**Yang DISIMPAN:**\n"
+            "• Nama & ID player\n"
+            "• Custom hewan/tanaman/resep yang lu bikin\n"
+            "• Title definition (cuma koleksi player yang dihapus)\n"
+            "• Toko permata & event code\n\n"
+            "🛑 **Aksi ini TIDAK BISA di-undo!**\n\n"
+            "Kalau yakin, ketik:\n"
+            "`/resetall CONFIRM`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    # Konfirmasi diterima — eksekusi
+    async with get_db() as db:
+        rows = await fetchall(db, "SELECT user_id FROM users")
+        user_ids = [r["user_id"] for r in rows]
+
+    success = 0
+    failed = 0
+    for uid in user_ids:
+        try:
+            ok = await _reset_user_data(uid)
+            if ok:
+                success += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+
+    await log_admin_action(
+        update.effective_user.id, "reset_all_players", None,
+        f"success={success} failed={failed}"
+    )
+
+    await update.message.reply_text(
+        f"💀 **RESET ALL SELESAI**\n\n"
+        f"✅ Berhasil di-reset: {success} player\n"
+        f"❌ Gagal: {failed} player\n\n"
+        f"Semua player mulai dari nol lagi.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    # Broadcast notif (best-effort, jangan crash kalau ada user yang block)
+    notif_sent = 0
+    for uid in user_ids:
+        try:
+            await ctx.bot.send_message(
+                uid,
+                "⚠️ SERVER RESET\n\n"
+                "Semua data player Greena Farm telah di-reset oleh admin.\n"
+                "Kamu mulai dari awal lagi.\n\n"
+                "Ketik /start untuk mulai bermain."
+            )
+            notif_sent += 1
+        except Exception:
+            pass
+
+    if notif_sent > 0:
+        await update.message.reply_text(
+            f"📢 Notif terkirim ke {notif_sent} player."
+        )
