@@ -96,13 +96,16 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
     kind = media["kind"]
     file_id = media["file_id"]
 
-    # Pesan dari callback query → coba EDIT, jangan delete+send
+    # Pesan dari callback query
     if hasattr(target, "message") and target.message:
         from telegram import InputMediaPhoto, InputMediaAnimation
         msg_obj = target.message
-        try:
-            # Coba edit_message_media kalau pesan asal udah punya media
-            if msg_obj.photo or msg_obj.animation or msg_obj.video:
+        bot = msg_obj.get_bot()
+        chat_id = msg_obj.chat_id
+
+        # Case 1: Pesan asal udah punya media → edit_media (no spam)
+        if msg_obj.photo or msg_obj.animation or msg_obj.video:
+            try:
                 if kind == "animation":
                     new_media = InputMediaAnimation(
                         media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
@@ -113,18 +116,37 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
                     )
                 await msg_obj.edit_media(media=new_media, reply_markup=keyboard)
                 return
+            except Exception as e:
+                logger.error(f"edit_media failed: {e}")
+
+        # Case 2: Pesan asal teks → harus delete + send (sekali aja)
+        # Setelah ini, pesan udah jadi media, jadi next call bakal pake edit_media
+        try:
+            await msg_obj.delete()
+        except Exception:
+            pass
+        try:
+            if kind == "animation":
+                await bot.send_animation(
+                    chat_id=chat_id, animation=file_id, caption=text,
+                    reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                )
             else:
-                # Pesan asal teks, nggak bisa convert ke media via edit
-                # → edit caption-nya jadi text doang (anti-spam)
-                await safe_edit(target, text, keyboard)
-                return
+                await bot.send_photo(
+                    chat_id=chat_id, photo=file_id, caption=text,
+                    reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                )
+            return
         except Exception as e:
-            logger.error(f"safe_send_photo edit failed: {e}, falling back to text edit")
+            logger.error(f"send media after delete failed: {e}")
             try:
-                await safe_edit(target, text, keyboard)
-                return
+                await bot.send_message(
+                    chat_id=chat_id, text=text,
+                    reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                )
             except Exception:
                 pass
+            return
 
     # Bukan dari callback (rare path) — kirim baru
     try:
