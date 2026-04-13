@@ -54,7 +54,7 @@ def is_silo_item(item_key: str) -> bool:
 def is_barn_item(item_key: str) -> bool:
     if item_key in UPGRADE_TOOLS or item_key in EXPANSION_TOOLS or item_key in CLEARING_TOOLS:
         return True
-    if item_key in ("pesticide", "fertilizer", "super_fertilizer"):
+    if item_key in ("pesticide", "fertilizer", "super_fertilizer", "animal_doping"):
         return True
     for b in BUILDINGS.values():
         if item_key in b["recipes"]:
@@ -436,6 +436,176 @@ async def collect_animal(user_id: int, slot: int) -> tuple[bool, str]:
     new_level, leveled_up, _ = await add_xp_and_check_level(user_id, 3)
     level_msg = f"\n🎉 Naik Level! Kamu sekarang Level {new_level}!" if leveled_up else ""
     return True, f"✅ Diambil {animal['prod_emoji']} {get_item_name(product)} dari {animal['emoji']} {animal['name']}!{level_msg}"
+
+
+async def transfer_item_to_player(sender_id: int, receiver_id: int, item_key: str, qty: int) -> tuple[bool, str]:
+    """Transfer item antar player. Limit 5x sehari per sender.
+    Aturan:
+    - Sender harus punya item yg cukup
+    - Receiver harus terdaftar di bot
+    - Receiver harus punya kapasitas penyimpanan
+    - Limit 5 transfer/hari per sender (reset jam 07:00 WIB)
+    - Tidak bisa transfer ke diri sendiri
+    """
+    if sender_id == receiver_id:
+        return False, "❌ Tidak bisa transfer ke diri sendiri."
+
+    if qty <= 0:
+        return False, "❌ Jumlah harus lebih dari 0."
+
+    # Cek receiver ada di DB
+    async with get_db() as db:
+        recv = await fetchone(db, "SELECT user_id, first_name FROM users WHERE user_id = ?", (receiver_id,))
+        if not recv:
+            return False, f"❌ User dengan ID `{receiver_id}` tidak ditemukan di bot."
+
+        # Cek limit harian sender (reset jam 07 WIB)
+        from datetime import datetime, timedelta, timezone as tz_mod
+        wib = tz_mod(timedelta(hours=7))
+        now_wib = datetime.now(wib)
+        daily_day = (now_wib - timedelta(hours=7)).date().isoformat()
+
+        sender = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (sender_id,)))
+        # last_transfer_day & transfer_count_today disimpen di game_settings
+        # supaya nggak nambah kolom DB
+        from database.db import get_setting, set_setting
+        key_day = f"transfer_day_{sender_id}"
+        key_cnt = f"transfer_cnt_{sender_id}"
+        last_day = await get_setting(key_day, "")
+        if last_day == daily_day:
+            count = int(await get_setting(key_cnt, "0"))
+        else:
+            count = 0
+
+        if count >= 5:
+            next_reset = now_wib.replace(hour=7, minute=0, second=0, microsecond=0)
+            if now_wib >= next_reset:
+                next_reset = next_reset + timedelta(days=1)
+            jam_lagi = int((next_reset - now_wib).total_seconds() // 3600)
+            return False, (
+                f"❌ LIMIT TRANSFER HARIAN HABIS!\n\n"
+                f"Maks 5 transfer/hari\n"
+                f"Reset: jam 07:00 WIB ({jam_lagi} jam lagi)"
+            )
+
+    # Cek stock sender
+    have = await get_item_count(sender_id, item_key)
+    if have < qty:
+        return False, f"❌ Stok tidak cukup. Punya: {have}, butuh: {qty}"
+
+    # Cek receiver capacity (try add dulu — kalau gagal nggak jadi)
+    # Kurangi dari sender dulu
+    ok_remove, msg_remove = await remove_from_inventory(sender_id, item_key, qty)
+    if not ok_remove:
+        return False, msg_remove
+
+    ok_add, msg_add = await add_to_inventory(receiver_id, item_key, qty)
+    if not ok_add:
+        # Refund balik ke sender
+        await add_to_inventory(sender_id, item_key, qty)
+        return False, f"❌ Gagal kirim: {msg_add}\n\n_(Item sudah dikembalikan ke kamu)_"
+
+    # Update counter
+    from database.db import set_setting
+    await set_setting(key_day, daily_day)
+    await set_setting(key_cnt, str(count + 1))
+
+    emoji = get_item_emoji(item_key)
+    name = get_item_name(item_key)
+    recv_name = recv["first_name"] or "Petani"
+    return True, (
+        f"✅ Transfer berhasil!\n\n"
+        f"📤 Kirim: {qty}x {emoji} {name}\n"
+        f"📥 Ke: **{recv_name}** (`{receiver_id}`)\n"
+        f"📊 Sisa kuota hari ini: {5 - (count + 1)}/5"
+    )
+
+
+async def apply_animal_doping(user_id: int, slot: int) -> tuple[bool, str]:
+    """Pake doping ke hewan: kurangin waktu produksi 30%."""
+    async with get_db() as db:
+        # Cek inventory player
+        user = dict(await fetchone(db, "SELECT barn_items FROM users WHERE user_id = ?", (user_id,)))
+        barn = parse_json_field(user["barn_items"])
+        if barn.get("animal_doping", 0) < 1:
+            return False, (
+                "💉 KAMU TIDAK PUNYA DOPING!\n\n"
+                "Beli di 🛒 Toko Alat → kategori Peternakan\n"
+                "Harga: Rp30.000/biji"
+            )
+
+        pen = await fetchone(db, "SELECT * FROM animal_pens WHERE user_id = ? AND slot = ?", (user_id, slot))
+        if not pen or pen["status"] != "producing":
+            return False, "❌ Kandang ini kosong atau hewan belum aktif."
+
+        ready_at = datetime.fromisoformat(pen["ready_at"])
+        if ready_at.tzinfo is None:
+            ready_at = ready_at.replace(tzinfo=timezone.utc)
+        now = utcnow()
+        if now >= ready_at:
+            return False, "✅ Hewan udah siap panen, ngapain pake doping?"
+
+        # Kurangin waktu sisa 30%
+        remaining = (ready_at - now).total_seconds()
+        new_remaining = remaining * 0.7  # 30% lebih cepet
+        new_ready_at = now + timedelta(seconds=new_remaining)
+
+        # Pake 1 doping
+        barn["animal_doping"] -= 1
+        if barn["animal_doping"] <= 0:
+            del barn["animal_doping"]
+
+        await db.execute(
+            "UPDATE animal_pens SET ready_at=? WHERE user_id=? AND slot=?",
+            (new_ready_at.isoformat(), user_id, slot)
+        )
+        await db.execute(
+            "UPDATE users SET barn_items = ? WHERE user_id = ?",
+            (dump_json_field(barn), user_id)
+        )
+        await db.commit()
+
+    saved = int(remaining * 0.3)
+    animal = ANIMALS.get(pen["animal"], {})
+    return True, (
+        f"💉 Doping berhasil dipake!\n\n"
+        f"{animal.get('emoji', '🐾')} {animal.get('name', 'Hewan')} sekarang siap dalam {fmt_time(int(new_remaining))}\n"
+        f"⚡ Hemat: {fmt_time(saved)}"
+    )
+
+
+async def remove_animal(user_id: int, slot: int) -> tuple[bool, str]:
+    """Hapus hewan dari kandang. Refund 50% dari harga beli."""
+    async with get_db() as db:
+        pen = await fetchone(db, "SELECT * FROM animal_pens WHERE user_id = ? AND slot = ?", (user_id, slot))
+        if not pen or pen["status"] == "empty":
+            return False, "❌ Kandang ini kosong, tidak ada hewan yang bisa dihapus."
+
+        animal_key = pen["animal"]
+        # Cek hewan default + custom
+        if animal_key in ANIMALS:
+            animal = ANIMALS[animal_key]
+        else:
+            return False, "❌ Hewan tidak dikenal."
+
+        # Refund 50% biar player nggak rugi total
+        refund = animal["buy_cost"] // 2
+
+        await db.execute(
+            "UPDATE animal_pens SET animal=NULL, fed_at=NULL, ready_at=NULL, status='empty' WHERE user_id=? AND slot=?",
+            (user_id, slot)
+        )
+        await db.execute(
+            "UPDATE users SET coins = coins + ? WHERE user_id = ?",
+            (refund, user_id)
+        )
+        await db.commit()
+
+    return True, (
+        f"🗑️ {animal['emoji']} {animal['name']} dihapus dari kandang.\n"
+        f"💵 Refund: Rp{refund:,} (50%)\n\n"
+        f"Kandang sekarang kosong, siap diisi hewan baru!"
+    )
 
 
 async def collect_all_animals(user_id: int) -> tuple[int, int, str]:
