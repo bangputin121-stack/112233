@@ -31,6 +31,7 @@ def main_menu_keyboard():
             InlineKeyboardButton("🎁 Hadiah Harian", callback_data="daily"),
         ],
         [
+            InlineKeyboardButton("📚 Katalog Item", callback_data="items_all"),
             InlineKeyboardButton("❓ Bantuan", callback_data="help"),
         ],
     ])
@@ -418,9 +419,6 @@ def items_keyboard():
         [
             InlineKeyboardButton("🏭 Barang Olahan", callback_data="items_products"),
             InlineKeyboardButton("🛒 Alat", callback_data="items_tools"),
-        ],
-        [
-            InlineKeyboardButton("📚 Semua Item", callback_data="items_all"),
         ],
         [InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")],
     ])
