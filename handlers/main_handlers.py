@@ -491,6 +491,105 @@ async def pen_collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         await query.answer(msg, show_alert=True)
 
+
+async def pen_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Tampilin detail hewan + opsi doping/hapus."""
+    query = update.callback_query
+    await query.answer()
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    pens = await get_animal_pens(user.id)
+    pen = next((p for p in pens if p["slot"] == slot), None)
+    if not pen or pen["status"] != "producing":
+        await query.answer("❌ Kandang ini kosong.", show_alert=True)
+        return
+
+    from game.data import ANIMALS
+    animal_key = pen["animal"]
+    animal = ANIMALS.get(animal_key, {})
+
+    # Hitung sisa waktu
+    from datetime import datetime, timezone
+    ready_at = datetime.fromisoformat(pen["ready_at"])
+    if ready_at.tzinfo is None:
+        ready_at = ready_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    remaining = max(0, int((ready_at - now).total_seconds()))
+
+    db_user = await get_user_full(user.id)
+    barn = parse_json_field(db_user["barn_items"])
+    has_doping = barn.get("animal_doping", 0) > 0
+
+    from game.engine import fmt_time
+    text = (
+        f"🐾 **Detail Kandang {slot+1}**\n\n"
+        f"{animal.get('emoji', '🐾')} **{animal.get('name', 'Hewan')}**\n"
+        f"⏰ Sisa waktu: {fmt_time(remaining) if remaining > 0 else '✅ SIAP PANEN'}\n"
+        f"📦 Produk: {animal.get('prod_emoji', '')} {animal.get('product', '?').replace('_', ' ').title()}\n"
+        f"💵 Harga jual produk: Rp{animal.get('sell_price', 0):,}\n\n"
+        f"💊 Doping kamu: {barn.get('animal_doping', 0)}\n\n"
+        f"**Aksi yang tersedia:**\n"
+        f"• 💊 Doping → kurangin waktu 30%\n"
+        f"• 🗑️ Hapus → refund 50% harga beli"
+    )
+    from utils.keyboards import pen_detail_keyboard
+    await safe_edit(query, text, pen_detail_keyboard(slot, animal_key, has_doping))
+
+
+async def pen_remove_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Hapus hewan dari kandang dengan refund 50%."""
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    from game.engine import remove_animal
+    ok, msg = await remove_animal(user.id, slot)
+    if ok:
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens), animals_keyboard(pens, db_user["level"]))
+    else:
+        await query.answer(msg, show_alert=True)
+
+
+async def pen_dope_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Pake doping ke hewan."""
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    from game.engine import apply_animal_doping
+    ok, msg = await apply_animal_doping(user.id, slot)
+    if ok:
+        # Refresh detail page biar player liat efek doping
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        pen = next((p for p in pens if p["slot"] == slot), None)
+        if pen and pen["status"] == "producing":
+            from game.data import ANIMALS
+            from datetime import datetime, timezone
+            from game.engine import fmt_time
+            from utils.keyboards import pen_detail_keyboard
+            animal = ANIMALS.get(pen["animal"], {})
+            ready_at = datetime.fromisoformat(pen["ready_at"])
+            if ready_at.tzinfo is None:
+                ready_at = ready_at.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            remaining = max(0, int((ready_at - now).total_seconds()))
+            barn = parse_json_field(db_user["barn_items"])
+            has_doping = barn.get("animal_doping", 0) > 0
+            text = (
+                f"🐾 **Detail Kandang {slot+1}**\n\n"
+                f"{msg}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"{animal.get('emoji', '🐾')} **{animal.get('name', 'Hewan')}**\n"
+                f"⏰ Sisa waktu: {fmt_time(remaining) if remaining > 0 else '✅ SIAP PANEN'}\n"
+                f"💊 Doping kamu: {barn.get('animal_doping', 0)}"
+            )
+            await safe_edit(query, text, pen_detail_keyboard(slot, pen["animal"], has_doping))
+        else:
+            await query.answer(msg, show_alert=True)
+    else:
+        await query.answer(msg, show_alert=True)
+
 async def expand_pens_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
@@ -1410,10 +1509,89 @@ async def daily_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def help_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await safe_edit(query, fmt_help(), back_to_menu())
+    from utils.formatters import help_total_pages
+    from utils.keyboards import help_slide_keyboard
+    await safe_edit(query, fmt_help(0), help_slide_keyboard(0, help_total_pages()))
+
+async def help_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    from utils.formatters import help_total_pages
+    from utils.keyboards import help_slide_keyboard
+    try:
+        page = int(query.data.split("_")[2])
+    except Exception:
+        page = 0
+    total = help_total_pages()
+    page = max(0, min(page, total - 1))
+    await safe_edit(query, fmt_help(page), help_slide_keyboard(page, total))
 
 async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await safe_send(update, fmt_help(), back_to_menu())
+    from utils.formatters import help_total_pages
+    from utils.keyboards import help_slide_keyboard
+    await safe_send(update, fmt_help(0), help_slide_keyboard(0, help_total_pages()))
+
+
+async def transfer_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Transfer item ke player lain. Format: /transfer <user_id> <item_key> <qty>"""
+    args = ctx.args
+    user = update.effective_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+
+    if len(args) < 3:
+        await safe_send(update, (
+            "📤 **TRANSFER ITEM**\n\n"
+            "Kirim item ke player lain.\n\n"
+            "**Format:**\n"
+            "`/transfer <user_id> <item_key> <qty>`\n\n"
+            "**Contoh:**\n"
+            "`/transfer 123456789 wheat 20`\n"
+            "`/transfer 123456789 egg 5`\n"
+            "`/transfer 123456789 bread 3`\n\n"
+            "**Aturan:**\n"
+            "• Maks 5 transfer/hari (reset jam 07:00 WIB)\n"
+            "• Tidak bisa kirim ke diri sendiri\n"
+            "• Receiver harus terdaftar di bot\n"
+            "• Item bakal dipotong dari Gudang/Lumbung kamu\n"
+            "• Cek user_id lewat /profile (yang mau ditransfer harus kasih ID-nya)"
+        ), back_to_menu())
+        return
+
+    try:
+        receiver_id = int(args[0])
+    except ValueError:
+        await safe_send(update, "❌ user_id harus angka.", back_to_menu())
+        return
+
+    item_key = args[1].lower()
+
+    try:
+        qty = int(args[2])
+    except ValueError:
+        await safe_send(update, "❌ qty harus angka.", back_to_menu())
+        return
+
+    from game.engine import transfer_item_to_player
+    ok, msg = await transfer_item_to_player(user.id, receiver_id, item_key, qty)
+    await safe_send(update, msg, back_to_menu())
+
+    # Notif ke receiver
+    if ok:
+        try:
+            from game.data import get_item_emoji, get_item_name
+            emoji = get_item_emoji(item_key)
+            name = get_item_name(item_key)
+            sender_name = user.first_name or "Petani"
+            await ctx.bot.send_message(
+                receiver_id,
+                f"📦 **Kamu dapet kiriman item!**\n\n"
+                f"Dari: **{sender_name}** (`{user.id}`)\n"
+                f"Item: {qty}x {emoji} {name}\n\n"
+                f"Cek di 📦 Penyimpanan!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
 
 # ─── TOKO ALAT ────────────────────────────────────────────────────────────────
 
