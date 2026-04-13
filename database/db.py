@@ -13,8 +13,14 @@ DB_PATH = os.getenv("DB_PATH", "harvest_kingdom.db")
 async def get_db():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA journal_mode=WAL")
+        # Optimasi SQLite buat handle banyak concurrent user
+        await db.execute("PRAGMA journal_mode=WAL")        # Multi-reader concurrent
+        await db.execute("PRAGMA synchronous=NORMAL")      # Lebih cepet, masih aman
+        await db.execute("PRAGMA cache_size=-20000")       # 20MB cache (negative = KB)
+        await db.execute("PRAGMA temp_store=MEMORY")       # Temp table di RAM
+        await db.execute("PRAGMA mmap_size=268435456")     # 256MB mmap
         await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("PRAGMA busy_timeout=5000")       # Wait 5s kalau locked
         yield db
 
 async def fetchone(db, sql: str, params: tuple = ()):
@@ -32,7 +38,13 @@ async def fetchall(db, sql: str, params: tuple = ()):
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        # Optimasi SQLite (sama kayak get_db)
         await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA cache_size=-20000")
+        await db.execute("PRAGMA temp_store=MEMORY")
+        await db.execute("PRAGMA mmap_size=268435456")
+        await db.execute("PRAGMA busy_timeout=5000")
         await db.execute("""CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT,
             coins INTEGER DEFAULT 50000, gems INTEGER DEFAULT 5,
