@@ -20,6 +20,8 @@ from handlers.main_handlers import (
     plot_spray_callback, spray_all_callback, fertilize_menu_callback, fertilize_callback,
     animals_callback, pen_buy_callback, buyanimal_callback,
     pen_collect_callback, expand_pens_callback, collect_all_animals_callback,
+    pen_detail_callback, pen_remove_callback, pen_dope_callback,
+    transfer_cmd,
     factories_callback, buy_building_callback, factory_detail_callback,
     produce_callback, collect_callback,
     storage_callback, storage_silo_callback, storage_barn_callback,
@@ -38,7 +40,7 @@ from handlers.main_handlers import (
     tutorial_callback, tutorial_cmd,
     items_callback, items_cmd,
     daily_callback, daily_cmd,
-    help_callback, help_cmd,
+    help_callback, help_cmd, help_page_callback,
     noop_callback, locked_callback,
     gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
     redeem_prompt_callback, redeem_cmd,
@@ -100,6 +102,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("daily", daily_cmd))
     app.add_handler(CommandHandler("profile", profile_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("transfer", transfer_cmd))
     app.add_handler(CommandHandler("listitem", listitem_cmd))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
     app.add_handler(CommandHandler("setname", setname_cmd))
@@ -190,6 +193,9 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(pen_buy_callback, pattern=r"^pen_buy_\d+$"))
     app.add_handler(CallbackQueryHandler(buyanimal_callback, pattern=r"^buyanimal_\d+_.+$"))
     app.add_handler(CallbackQueryHandler(pen_collect_callback, pattern=r"^pen_collect_\d+$"))
+    app.add_handler(CallbackQueryHandler(pen_detail_callback, pattern=r"^pen_detail_\d+$"))
+    app.add_handler(CallbackQueryHandler(pen_remove_callback, pattern=r"^pen_remove_\d+$"))
+    app.add_handler(CallbackQueryHandler(pen_dope_callback, pattern=r"^pen_dope_\d+$"))
     app.add_handler(CallbackQueryHandler(collect_all_animals_callback, pattern="^collect_all_animals$"))
     app.add_handler(CallbackQueryHandler(expand_pens_callback, pattern="^expand_pens$"))
 
@@ -242,6 +248,7 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(items_callback, pattern=r"^items_(crops|animals|products|tools|all)$"))
     app.add_handler(CallbackQueryHandler(daily_callback, pattern="^daily$"))
     app.add_handler(CallbackQueryHandler(help_callback, pattern="^help$"))
+    app.add_handler(CallbackQueryHandler(help_page_callback, pattern=r"^help_page_\d+$"))
     app.add_handler(CallbackQueryHandler(noop_callback, pattern="^noop$"))
     app.add_handler(CallbackQueryHandler(locked_callback, pattern="^locked$"))
 
