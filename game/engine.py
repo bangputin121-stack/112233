@@ -75,13 +75,25 @@ async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[b
         if is_silo_item(item_key):
             used = sum(silo.values())
             if used + qty > silo_cap:
-                return False, f"🚫 Gudang penuh! ({used}/{silo_cap}). Upgrade gudang kamu dulu."
+                return False, (
+                    f"📦 GUDANG PENUH!\n\n"
+                    f"Kapasitas: {used}/{silo_cap}\n"
+                    f"Mau masukin: {qty} item\n\n"
+                    f"💡 Jual hasil panen di Gudang\n"
+                    f"   atau Upgrade Gudang dulu!"
+                )
             silo[item_key] = silo.get(item_key, 0) + qty
             await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
         elif is_barn_item(item_key):
             used = sum(barn.values())
             if used + qty > barn_cap:
-                return False, f"🚫 Lumbung penuh! ({used}/{barn_cap}). Upgrade lumbung kamu dulu."
+                return False, (
+                    f"🏚 LUMBUNG PENUH!\n\n"
+                    f"Kapasitas: {used}/{barn_cap}\n"
+                    f"Mau masukin: {qty} item\n\n"
+                    f"💡 Jual produk olahan dulu\n"
+                    f"   atau Upgrade Lumbung!"
+                )
             barn[item_key] = barn.get(item_key, 0) + qty
             await db.execute("UPDATE users SET barn_items = ? WHERE user_id = ?", (dump_json_field(barn), user_id))
         else:
@@ -163,7 +175,14 @@ async def plant_crop(user_id: int, slot: int, crop_key: str) -> tuple[bool, str]
 
         seed_cost = crop["seed_cost"]
         if user["coins"] < seed_cost:
-            return False, f"💵 Butuh Rp{seed_cost:,} untuk benih (kamu punya Rp{user['coins']:,})."
+            kurang = seed_cost - user["coins"]
+            return False, (
+                f"💸 SALDO TIDAK CUKUP!\n\n"
+                f"Butuh: Rp{seed_cost:,}\n"
+                f"Punya: Rp{user['coins']:,}\n"
+                f"Kurang: Rp{kurang:,}\n\n"
+                f"💡 Jual hasil panen di Gudang dulu!"
+            )
 
         now = utcnow()
         ready_at = now + timedelta(seconds=crop["grow_time"])
@@ -1001,10 +1020,22 @@ async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
     if item_key in CROPS:
         price = CROPS[item_key]["sell_price"]
     else:
-        for bld in BUILDINGS.values():
-            if item_key in bld["recipes"]:
-                price = bld["recipes"][item_key]["sell_price"]
+        # Cek produk hewan default (egg, milk, bacon, wool, dll)
+        for a_key, a_val in ANIMALS.items():
+            if a_val.get("product") == item_key:
+                price = a_val.get("sell_price", 0)
                 break
+        # Cek produk hewan custom (CUSTOM_ANIMAL_PRODUCTS dari /addanimal)
+        if price == 0:
+            from game.data import CUSTOM_ANIMAL_PRODUCTS
+            if item_key in CUSTOM_ANIMAL_PRODUCTS:
+                price = CUSTOM_ANIMAL_PRODUCTS[item_key].get("sell_price", 0)
+        # Cek produk olahan pabrik
+        if price == 0:
+            for bld in BUILDINGS.values():
+                if item_key in bld["recipes"]:
+                    price = bld["recipes"][item_key]["sell_price"]
+                    break
 
     if price == 0:
         return False, "❌ Item ini tidak bisa dijual langsung."
@@ -1026,16 +1057,38 @@ async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
     return True, f"✅ Terjual {qty}x {emoji} {get_item_name(item_key)} seharga Rp{total:,}!"
 
 async def claim_daily(user_id: int) -> tuple[bool, str]:
-    from datetime import date
+    """Daily reset di jam 07:00 WIB (UTC+7).
+    'Hari' di sini = periode 07:00 WIB hari A sampai 06:59 WIB hari A+1.
+    Caranya: pake waktu sekarang dalam WIB, kurangin 7 jam, ambil tanggalnya.
+    Dengan begitu, jam 06:59 WIB tanggal 10 = "tanggal 9", jam 07:00 WIB = "tanggal 10".
+    """
+    from datetime import datetime, timedelta, timezone
+    wib = timezone(timedelta(hours=7))
+    now_wib = datetime.now(wib)
+    # Geser 7 jam mundur biar pergantian "hari" jadi jam 07:00 WIB
+    daily_day = (now_wib - timedelta(hours=7)).date().isoformat()
+
     async with get_db() as db:
         user = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (user_id,)))
-        today = date.today().isoformat()
-        if user["last_daily"] == today:
-            return False, "⏰ Hadiah hari ini sudah diambil! Kembali besok."
+        if user["last_daily"] == daily_day:
+            # Hitung kapan reset berikutnya buat info
+            next_reset = (now_wib.replace(hour=7, minute=0, second=0, microsecond=0))
+            if now_wib >= next_reset:
+                next_reset = next_reset + timedelta(days=1)
+            jam_lagi = int((next_reset - now_wib).total_seconds() // 3600)
+            menit_lagi = int(((next_reset - now_wib).total_seconds() % 3600) // 60)
+            return False, (
+                f"⏰ Hadiah hari ini SUDAH DIAMBIL!\n\n"
+                f"Reset berikutnya: jam 07:00 WIB\n"
+                f"({jam_lagi} jam {menit_lagi} menit lagi)"
+            )
 
         coins = 10000 + (user["level"] * 1000)
         xp = 20 + (user["level"] * 2)
-        await db.execute("UPDATE users SET coins = coins + ?, last_daily = ? WHERE user_id = ?", (coins, today, user_id))
+        await db.execute(
+            "UPDATE users SET coins = coins + ?, last_daily = ? WHERE user_id = ?",
+            (coins, daily_day, user_id)
+        )
         await db.commit()
 
     new_level, leveled_up, _ = await add_xp_and_check_level(user_id, xp)
