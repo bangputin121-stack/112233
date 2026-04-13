@@ -287,7 +287,6 @@ async def plot_plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("_")
     slot = int(parts[1])
     crop_key = "_".join(parts[2:])
@@ -308,7 +307,6 @@ async def plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def plot_harvest_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     slot = int(query.data.split("_")[2])
     user = query.from_user
     await get_or_create_user(user.id, user.username, user.first_name)
@@ -351,7 +349,6 @@ async def expand_farm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def plot_spray_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     slot = int(query.data.split("_")[2])
     user = query.from_user
     ok, msg = await spray_pesticide(user.id, slot)
@@ -435,7 +432,6 @@ async def fertilize_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 
 async def fertilize_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("_")
     slot = int(parts[1])
     fert_type = "_".join(parts[2:])
@@ -470,7 +466,6 @@ async def pen_buy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def buyanimal_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("_")
     slot = int(parts[1])
     animal_key = "_".join(parts[2:])
@@ -486,7 +481,6 @@ async def buyanimal_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def pen_collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     slot = int(query.data.split("_")[2])
     user = query.from_user
     ok, msg = await collect_animal(user.id, slot)
@@ -537,7 +531,6 @@ async def factories_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def buy_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     building_key = "_".join(query.data.split("_")[2:])
     user = query.from_user
     ok, msg = await buy_building(user.id, building_key)
@@ -780,7 +773,6 @@ async def orders_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def fulfill_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     order_id = int(query.data.split("_")[1])
     user = query.from_user
     ok, msg = await fulfill_order(user.id, order_id)
@@ -794,7 +786,6 @@ async def fulfill_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def refresh_orders_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user = query.from_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     ok, msg = await refresh_orders(user.id, db_user["level"])
