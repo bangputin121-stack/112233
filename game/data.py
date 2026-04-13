@@ -177,6 +177,8 @@ TOOL_SHOP = {
     "pesticide":     {"price": 10000,  "emoji": "🧴", "name": "Pestisida",    "category": "Pertanian"},
     "fertilizer":    {"price": 20000,  "emoji": "🧪", "name": "Pupuk Biasa (30%)",  "category": "Pertanian"},
     "super_fertilizer": {"price": 50000, "emoji": "⚗️", "name": "Pupuk Super (50%)", "category": "Pertanian"},
+    # Doping hewan (sistem mirip pupuk tapi buat hewan)
+    "animal_doping": {"price": 30000, "emoji": "💉", "name": "Doping Hewan (-30% waktu)", "category": "Peternakan"},
 }
 
 ALL_ITEMS = {}
