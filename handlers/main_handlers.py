@@ -675,7 +675,7 @@ async def sell_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if qty == 0:
         await query.answer("Kamu tidak punya item ini!", show_alert=True)
         return
-    from game.data import get_item_emoji, get_item_name, CROPS, BUILDINGS
+    from game.data import get_item_emoji, get_item_name, CROPS, BUILDINGS, ANIMALS
     emoji = get_item_emoji(item_key)
     name = get_item_name(item_key)
 
@@ -683,10 +683,22 @@ async def sell_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if item_key in CROPS:
         sell_price = CROPS[item_key]["sell_price"]
     else:
-        for bld in BUILDINGS.values():
-            if item_key in bld["recipes"]:
-                sell_price = bld["recipes"][item_key]["sell_price"]
+        # Cek produk hewan default (egg, milk, bacon, wool, dll)
+        for a_val in ANIMALS.values():
+            if a_val.get("product") == item_key:
+                sell_price = a_val.get("sell_price", 0)
                 break
+        # Cek produk hewan custom
+        if sell_price == 0:
+            from game.data import CUSTOM_ANIMAL_PRODUCTS
+            if item_key in CUSTOM_ANIMAL_PRODUCTS:
+                sell_price = CUSTOM_ANIMAL_PRODUCTS[item_key].get("sell_price", 0)
+        # Cek produk olahan pabrik
+        if sell_price == 0:
+            for bld in BUILDINGS.values():
+                if item_key in bld["recipes"]:
+                    sell_price = bld["recipes"][item_key]["sell_price"]
+                    break
 
     price_line = f"💵 Harga jual: Rp{sell_price:,}/satuan" if sell_price else "⚠️ Tidak bisa dijual langsung (pasang di pasar saja)"
     text = f"{emoji} **{name}** (kamu punya: {qty})\n{price_line}"
