@@ -42,6 +42,35 @@ def main_menu_keyboard():
 def back_to_menu():
     return InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")]])
 
+def help_slide_keyboard(page: int, total: int):
+    """Keyboard buat slide help. Prev/Next + jump halaman + back to menu."""
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Sebelum", callback_data=f"help_page_{page-1}"))
+    if page < total - 1:
+        nav.append(InlineKeyboardButton("Lanjut ▶️", callback_data=f"help_page_{page+1}"))
+
+    buttons = []
+    if nav:
+        buttons.append(nav)
+
+    # Jump baris (halaman 1-4 dan 5-8)
+    page_labels = ["📖", "🌾", "🐾", "🏭", "🚚", "🏪", "📦", "💎", "📋"]
+    row1 = []
+    for i in range(min(5, total)):
+        marker = "•" if i == page else page_labels[i]
+        row1.append(InlineKeyboardButton(f"{marker}{i+1 if i != page else ''}", callback_data=f"help_page_{i}"))
+    buttons.append(row1)
+    if total > 5:
+        row2 = []
+        for i in range(5, total):
+            marker = "•" if i == page else page_labels[i] if i < len(page_labels) else "📖"
+            row2.append(InlineKeyboardButton(f"{marker}{i+1 if i != page else ''}", callback_data=f"help_page_{i}"))
+        buttons.append(row2)
+
+    buttons.append([InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")])
+    return InlineKeyboardMarkup(buttons)
+
 def farm_keyboard(plots: list[dict], user_level: int):
     buttons = []
     row = []
@@ -125,9 +154,11 @@ def animals_keyboard(pens: list[dict], user_level: int):
             now = datetime.now(timezone.utc)
             if now >= ready_at:
                 label = f"✅ {ANIMALS[pen['animal']]['emoji']}{slot+1}"
+                cb = f"pen_collect_{slot}"
             else:
                 label = f"{ANIMALS[pen['animal']]['emoji']} {slot+1}"
-            cb = f"pen_collect_{slot}"
+                # Ke detail buat opsi hapus/doping
+                cb = f"pen_detail_{slot}"
         else:
             label = f"❓ {slot+1}"
             cb = f"pen_{slot}"
@@ -143,6 +174,24 @@ def animals_keyboard(pens: list[dict], user_level: int):
         InlineKeyboardButton("🐾 Perluas Kandang", callback_data="expand_pens"),
     ])
     buttons.append([InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def pen_detail_keyboard(slot: int, animal_key: str, has_doping: bool = False):
+    """Keyboard detail kandang: opsi doping, hapus hewan, kembali."""
+    buttons = []
+    if has_doping:
+        buttons.append([
+            InlineKeyboardButton("💊 Pake Doping (-30% waktu)", callback_data=f"pen_dope_{slot}")
+        ])
+    else:
+        buttons.append([
+            InlineKeyboardButton("💊 Doping (butuh: 1x 💉 Suntikan)", callback_data=f"pen_dope_{slot}")
+        ])
+    buttons.append([
+        InlineKeyboardButton("🗑️ Hapus Hewan (refund 50%)", callback_data=f"pen_remove_{slot}")
+    ])
+    buttons.append([InlineKeyboardButton("⬅️ Kembali", callback_data="animals")])
     return InlineKeyboardMarkup(buttons)
 
 def buy_animal_keyboard(user_level: int, slot: int):
