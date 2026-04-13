@@ -1649,16 +1649,51 @@ async def items_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     category = query.data.replace("items_", "")
     if category not in ("crops", "animals", "products", "tools", "all"):
         category = "all"
-    text = fmt_all_items(category)
-    # Telegram message max 4096 chars
-    if len(text) > 4000:
-        text = text[:3990] + "\n\n_(dipotong)_"
+
     from utils.keyboards import items_keyboard
-    await safe_edit(query, text, items_keyboard())
+    # "all" = landing page → tampilin menu pilihan kategori dulu, jangan dump semua
+    if category == "all":
+        text = (
+            "📚 *KATALOG ITEM — Greena Farm*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Pilih kategori item yang mau dilihat:\n\n"
+            "🌾 *Tanaman* — semua bibit & hasil panen\n"
+            "🐾 *Hewan* — ternak & produk hewan\n"
+            "🏭 *Barang Olahan* — resep pabrik\n"
+            "🛒 *Alat* — item dari toko alat\n"
+        )
+        await safe_edit(query, text, items_keyboard(), parse_mode=ParseMode.MARKDOWN)
+        return
+
+    # Kategori spesifik — generate dengan plain text (no markdown) biar nggak parse error
+    text = fmt_all_items(category)
+    # Strip markdown chars yang bisa bikin parser confused
+    text = text.replace("**", "").replace("`", "")
+    # Hard limit 4096 (telegram max), kasih buffer
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n... (terlalu panjang, dipotong)"
+    # Send tanpa parse_mode = no markdown error
+    try:
+        await query.edit_message_text(
+            text, reply_markup=items_keyboard(),
+            parse_mode=None, disable_web_page_preview=True
+        )
+    except Exception as e:
+        logger.error(f"items_callback edit failed: {e}")
+        await query.answer("Gagal load katalog. Coba lagi.", show_alert=True)
+
 
 async def items_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from utils.keyboards import items_keyboard
-    text = "📚 **Ensiklopedia Item**\n\nPilih kategori item yang mau dilihat:"
+    text = (
+        "📚 *KATALOG ITEM — Greena Farm*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Pilih kategori item yang mau dilihat:\n\n"
+        "🌾 *Tanaman* — semua bibit & hasil panen\n"
+        "🐾 *Hewan* — ternak & produk hewan\n"
+        "🏭 *Barang Olahan* — resep pabrik\n"
+        "🛒 *Alat* — item dari toko alat\n"
+    )
     await safe_send(update, text, items_keyboard())
 
 
