@@ -260,113 +260,312 @@ def fmt_leaderboard(users: list[dict], requester_id: int = None) -> str:
     return "\n".join(lines)
 
 
-def fmt_help() -> str:
-    return """
-❓ **GREENA FARM — PUSAT BANTUAN**
+HELP_PAGES = [
+    # Page 0 — Intro
+    """❓ **GREENA FARM — PUSAT BANTUAN**
 
-Bingung? Tenang, semua yang kamu butuh ada di sini 👇
+Halo Petani! 👋
+
+Bingung mulai dari mana? Tenang, panduan ini bagi-bagi materi jadi 8 halaman ringkas. Tap **Lanjut ▶️** buat mulai.
 
 ━━━━━━━━━━━━━━━━━━━━
 🎯 **TUJUAN GAME**
 ━━━━━━━━━━━━━━━━━━━━
-Bangun pertanian terbaik! Tanam → Panen → Olah → Jual → Kaya 💰
-Naik level buat unlock tanaman, hewan, & pabrik baru.
+
+Bangun pertanian terbaik:
+
+🌱 Tanam → 🌾 Panen → 🏭 Olah → 💰 Jual → 👑 Kaya
+
+Naik level buat unlock tanaman, hewan & pabrik baru. Setiap level baru = lebih banyak konten + lebih banyak cuan.
 
 ━━━━━━━━━━━━━━━━━━━━
-🌾 **1. BERTANI**
+📑 **DAFTAR ISI**
 ━━━━━━━━━━━━━━━━━━━━
-• Buka **🏠 Kebun Saya**
-• Tap kotak hijau 🟩 → pilih benih → tunggu tumbuh
-• Tap ✅ buat panen (atau tap **🌾 Panen Semua**)
-• Hasil masuk ke **Gudang** 🌾
+
+1️⃣ Bertani
+2️⃣ Hewan Ternak
+3️⃣ Pabrik
+4️⃣ Pesanan Truk
+5️⃣ Pasar P2P
+6️⃣ Penyimpanan
+7️⃣ Tips Pro
+8️⃣ Command List
+
+Tap **Lanjut ▶️** ke halaman 1.""",
+
+    # Page 1 — Bertani
+    """🌾 **HALAMAN 1 — BERTANI**
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Cara nanam:**
+1. Buka **🏠 Kebun Saya**
+2. Tap kotak hijau 🟩 (lahan kosong)
+3. Pilih benih tanaman
+4. Tunggu sampai siap panen
+5. Tap ✅ buat panen
+
+**Atau:** Tap **🌾 Panen Semua** buat panen semua sekaligus.
+
+**Tips:**
+• Hasil panen masuk ke **🌾 Gudang**
+• Awas hama 🐛 — pake pestisida atau spray
+• Pake pupuk biar lebih cepet tumbuh
 • 🎁 Bonus 5%: dapet alat upgrade gratis tiap panen!
 
+**Tanaman pemula:**
+🌾 Wheat — 2 menit (paling cepet, spam ini di awal!)
+🌽 Corn — 5 menit
+🍅 Tomato — 10 menit
+🥕 Carrot — 15 menit
+
 ━━━━━━━━━━━━━━━━━━━━
-🐾 **2. HEWAN TERNAK**
+Tap **Lanjut ▶️** buat hewan ternak.""",
+
+    # Page 2 — Hewan
+    """🐾 **HALAMAN 2 — HEWAN TERNAK**
+
 ━━━━━━━━━━━━━━━━━━━━
-• Buka **🐾 Hewan** (mulai Lv2)
-• Tap kandang kosong → beli hewan → tunggu produksi
-• Tap ✅ buat ambil produk (telur, susu, wol, dll)
+
+**Cara ternak:**
+1. Buka **🐾 Hewan** (mulai Lv2)
+2. Tap kandang kosong
+3. Beli hewan (butuh duit)
+4. Tunggu hewan produksi
+5. Tap ✅ buat ambil hasil produk
+
+**Hewan default:**
+🐔 Chicken Lv2 → 🥚 Telur (1 jam)
+🐄 Cow Lv5 → 🥛 Susu (2 jam)
+🐷 Pig Lv7 → 🥩 Bacon (3 jam)
+🐑 Sheep Lv9 → 🧶 Wool (4 jam)
+🐝 Bee Lv12 → 🍯 Honey (5 jam)
+🦞 Lobster Lv15 → 🦀 Lobster (6 jam)
+
+**Tips:**
+• Hasil produk masuk ke **🌾 Gudang**
+• Bisa dijual langsung atau diolah di pabrik
+• Beli hewan banyak biar produksi paralel
 • Beda hewan = beda waktu & harga produk
 
 ━━━━━━━━━━━━━━━━━━━━
-🏭 **3. PABRIK (PROFIT GEDE!)**
-━━━━━━━━━━━━━━━━━━━━
-Olah bahan mentah jadi barang jadi → harga jual **5–10x** lebih mahal!
-• Buka **🏭 Pabrik** → beli bangunan → pilih resep
-• Contoh: 🌾 Wheat → 🍞 Roti (Rp500 → Rp3.500/biji!)
-• Barang jadi masuk ke **Lumbung** 🏚
+Tap **Lanjut ▶️** buat pabrik.""",
+
+    # Page 3 — Pabrik
+    """🏭 **HALAMAN 3 — PABRIK (PROFIT GEDE!)**
 
 ━━━━━━━━━━━━━━━━━━━━
-🚚 **4. PESANAN TRUK** _(income terbesar!)_
-━━━━━━━━━━━━━━━━━━━━
-• Buka **🚚 Pesanan** → ada 9 pesanan aktif
-• Setor item yang diminta → dapet Rp + XP gede
-• Pesanan susah? Refresh 1x/24jam
+
+**Kenapa penting?** Olah bahan mentah jadi barang jadi → harga jual **5–10× lebih mahal!**
+
+**Contoh:**
+🌾 Wheat (Rp500) → 🍞 Roti (Rp3.500)
+**Profit 7×!** Tinggal nunggu 5 menit.
+
+**Cara:**
+1. Buka **🏭 Pabrik**
+2. Beli bangunan (butuh level + duit)
+3. Pilih resep yang mau diproduksi
+4. Tunggu selesai
+5. Ambil → masuk ke **🏚 Lumbung**
+
+**Bangunan tersedia:**
+🥖 Bakery (Lv3) — roti, popcorn
+⚙️ Feed Mill (Lv2) — pakan ternak
+🧈 Dairy (Lv6) — keju, butter, syrup
+🧵 Textile Mill (Lv11) — kain, sweater
+👨‍🍳 Kitchen (Lv14) — pizza, cake, ice cream
+
+**Aturan:** Wajib punya bahan mentah dulu sebelum produksi.
 
 ━━━━━━━━━━━━━━━━━━━━
-🏪 **5. PASAR P2P (Antar Pemain)**
-━━━━━━━━━━━━━━━━━━━━
-**Mau jual:**
-• Buka 📦 Penyimpanan → tap item → **📢 Pasang di Pasar**
-• Ikutin saran harga (Murah/Normal/Mahal)
-• Ketik command yang muncul → kelar
-• Listing otomatis tampil di channel pasar 📢
+Tap **Lanjut ▶️** buat pesanan truk.""",
 
-**Mau beli:**
-• Buka **🏪 Pasar** atau cek channel pasar
-• Tap item → konfirmasi → barang masuk gudang
-• Maks 5 listing aktif per orang
+    # Page 4 — Pesanan
+    """🚚 **HALAMAN 4 — PESANAN TRUK**
 
 ━━━━━━━━━━━━━━━━━━━━
-📦 **6. PENYIMPANAN & UPGRADE**
-━━━━━━━━━━━━━━━━━━━━
-🌾 **Gudang** = hasil panen & produk hewan
-🏚 **Lumbung** = barang olahan & alat
-• Penuh? Tap **⬆️ Upgrade** (butuh alat dari bonus panen / 🛒 Toko Alat)
+
+**INI SUMBER CUAN UTAMA!** 💰💰💰
+
+Pesanan truk kasih reward Rp **gede banget** + XP. Wajib prioritas tiap hari.
+
+**Cara:**
+1. Buka **🚚 Pesanan**
+2. Liat 9 pesanan aktif
+3. Cek bahan yang diminta
+4. Pastiin kamu punya semua bahan
+5. Tap **Setor** → otomatis dipotong + dapet reward
+
+**Tips:**
+• Refresh 1×/24jam kalau pesanannya susah
+• Selalu sediakan stok bahan yang sering diminta
+• Pesanan truk ngasih reward 2-5× harga jual normal
+• Setor sekaligus banyak biar grind lebih cepet
+
+**Bahan yang sering diminta:**
+🌾 Wheat, 🌽 Corn, 🥚 Egg, 🥛 Milk, 🍞 Bread, 🧀 Cheese
+
+**Strategi pro:** Setiap kali login, langsung cek pesanan. Kalau susah, refresh. Kalau gampang, setor semua.
 
 ━━━━━━━━━━━━━━━━━━━━
-🗺️ **7. PERLUASAN LAHAN**
-━━━━━━━━━━━━━━━━━━━━
-• Buka **🗺️ Lahan** → tap **Perluas**
-• Lahan baru ada rintangan (pohon, batu, rawa)
-• Bersihin pake alat (kapak/dinamit/sekop)
-• Tiap rintangan dibersihin = dapet Rp + XP
+Tap **Lanjut ▶️** buat pasar.""",
+
+    # Page 5 — Pasar
+    """🏪 **HALAMAN 5 — PASAR P2P**
 
 ━━━━━━━━━━━━━━━━━━━━
-💎 **TIPS PRO**
-━━━━━━━━━━━━━━━━━━━━
-✅ Ambil 🎁 **Hadiah Harian** TIAP HARI (jangan skip!)
-✅ Jangan jual mentah — olah dulu di pabrik!
-✅ Pesanan truk = sumber duit utama, prioritas!
-✅ Spam Wheat di awal (cuma 2 menit, untung cepet)
-✅ Upgrade gudang/lumbung sebelum penuh
-✅ Pantau channel pasar buat dapet harga murah
+
+**Mau jual ke pemain lain:**
+1. Buka 📦 Penyimpanan → tap item
+2. Tap **📢 Pasang di Pasar**
+3. Ikutin saran harga (Murah / Normal / Mahal)
+4. Ketik command yang muncul → kelar
+5. Listing otomatis tampil di **channel pasar** 📢
+
+**Mau beli dari pemain lain:**
+1. Buka **🏪 Pasar** atau cek channel pasar
+2. Tap item yang lu mau
+3. Konfirmasi → barang masuk gudang lu
+4. Saldo otomatis ke-transfer ke penjual
+
+**Aturan pasar:**
+• Maks 5 listing aktif per pemain
+• Harga ada batas maksimum (anti-cheat)
+• Item bisa di-cancel sewaktu-waktu
+• Setelah terbeli, listing otomatis hilang
+
+**Tips:**
+• Pantau channel pasar buat dapet harga murah
+• Jual barang langka di tier "Mahal"
+• Jangan jual mentah, olah dulu kalo bisa
 
 ━━━━━━━━━━━━━━━━━━━━
-📋 **DAFTAR COMMAND**
+Tap **Lanjut ▶️** buat penyimpanan.""",
+
+    # Page 6 — Penyimpanan
+    """📦 **HALAMAN 6 — PENYIMPANAN**
+
 ━━━━━━━━━━━━━━━━━━━━
-/start — Menu utama
-/farm — Kebun
-/storage — Penyimpanan
-/market — Pasar P2P
-/orders — Pesanan truk
-/daily — Hadiah harian
-/profile — Statistik kamu
-/leaderboard — Peringkat top
-/setname — Ganti nama
-/help — Halaman ini
+
+**Greena Farm punya 2 penyimpanan:**
+
+**🌾 Gudang (Silo)**
+Isi: Hasil panen tanaman + produk hewan
+Contoh: wheat, corn, egg, milk, wool, honey
+
+**🏚 Lumbung (Barn)**
+Isi: Barang olahan pabrik + alat upgrade
+Contoh: bread, cheese, pizza, bolt, plank
+
+**Cara upgrade:**
+1. Buka **📦 Penyimpanan**
+2. Tap **⬆️ Upgrade Gudang** atau Lumbung
+3. Butuh: alat upgrade (dari bonus panen / 🛒 Toko Alat) + duit
+
+**Kenapa harus upgrade?**
+• Kapasitas tambah 50 (gudang) atau 25 (lumbung) tiap level
+• Kalau penuh, panen bakal nge-block!
+• Penting buat scale-up produksi
+
+**Tips:**
+• Upgrade gudang dulu sebelum lumbung (panen lebih cepet penuh)
+• Beli alat di Toko Alat kalau bonus panen kurang
+• Cek tab Penyimpanan rutin biar nggak kelebihan
+
+━━━━━━━━━━━━━━━━━━━━
+Tap **Lanjut ▶️** buat tips pro.""",
+
+    # Page 7 — Tips
+    """💎 **HALAMAN 7 — TIPS PRO**
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Tips pemain pro buat naik level cepat:**
+
+✅ **Spam Wheat di awal**
+Cuma 2 menit, untung kecil tapi cepet. Cocok buat farming XP awal.
+
+✅ **Ambil 🎁 Hadiah Harian SETIAP HARI**
+Reset jam 07:00 WIB. Lupa = rugi gede.
+
+✅ **Jangan jual mentah, olah dulu di pabrik**
+Roti 7× lebih untung dari wheat. Pizza 10× lebih untung.
+
+✅ **Pesanan truk = prioritas #1**
+Income terbesar. Cek tiap login.
+
+✅ **Upgrade gudang/lumbung sebelum penuh**
+Kalau penuh, panen ke-block. Rugi waktu.
+
+✅ **Pantau channel pasar**
+Kadang ada player jual barang langka super murah.
+
+✅ **Beli hewan banyak**
+Produksi paralel = income pasif.
+
+✅ **Join grup OFC**
+Tanya-tanya, trading, ikut event!
+
+✅ **Set foto/GIF item premium**
+Bot punya fitur visual. Tanya admin.
+
+✅ **Jangan boros di awal**
+Save duit buat upgrade gudang & beli pabrik.
+
+━━━━━━━━━━━━━━━━━━━━
+Tap **Lanjut ▶️** buat command list.""",
+
+    # Page 8 — Command list
+    """📋 **HALAMAN 8 — DAFTAR COMMAND**
+
+━━━━━━━━━━━━━━━━━━━━
+
+**Command Player:**
+`/start` — Menu utama
+`/farm` — Kebun
+`/storage` — Penyimpanan
+`/market` — Pasar P2P
+`/orders` — Pesanan truk
+`/daily` — Hadiah harian
+`/profile` — Statistik kamu
+`/leaderboard` — Peringkat top
+`/setname` — Ganti nama
+`/mytitles` — Gelar koleksi kamu
+`/gemshop` — Toko permata
+`/redeem <code>` — Tukar kode hadiah
+`/help` — Halaman ini
 
 ━━━━━━━━━━━━━━━━━━━━
 🌐 **KOMUNITAS GREENA FARM**
 ━━━━━━━━━━━━━━━━━━━━
-📢 Channel Pasar: https://t.me/market_greena_farm
-👥 Grup OFC: https://t.me/GreenaFarm
+
+📢 Channel Pasar:
+https://t.me/market_greena_farm
+
+👥 Grup OFC:
+https://t.me/GreenaFarm
 
 Join grup buat tanya-tanya, trading, & event! 🎉
 
-Happy farming! 🌾👑
-"""
+━━━━━━━━━━━━━━━━━━━━
+
+Selesai! Lu udah baca semua materi.
+
+**Happy farming! 🌾👑**
+
+Tap **🏠 Menu Utama** buat balik ke main.""",
+]
+
+
+def fmt_help(page: int = 0) -> str:
+    page = max(0, min(page, len(HELP_PAGES) - 1))
+    body = HELP_PAGES[page]
+    return body + f"\n\n📖 Halaman {page + 1} / {len(HELP_PAGES)}"
+
+
+def help_total_pages() -> int:
+    return len(HELP_PAGES)
 
 
 def make_xp_bar(xp: int, next_xp: int, level: int) -> str:
