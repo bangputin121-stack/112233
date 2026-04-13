@@ -334,6 +334,7 @@ def main():
         Application.builder()
         .token(token)
         .post_init(post_init)
+        .concurrent_updates(True)   # Proses update paralel = jauh lebih cepet
         .build()
     )
 
