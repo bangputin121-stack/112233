@@ -2005,3 +2005,146 @@ async def resetall_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"📢 Notif terkirim ke {notif_sent} player."
         )
+
+
+# ─── ADMIN: ADD CUSTOM ORDER ─────────────────────────────────────────────────
+
+@admin_only
+async def addorder_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Nambahin pesanan custom ke 1 player.
+    Format:
+    /addorder <user_id> <reward_coins> <reward_xp> <item1:qty1,item2:qty2,...>
+
+    Contoh:
+    /addorder 123456789 50000 50 wheat:10,egg:5,bread:3
+    """
+    args = ctx.args
+    if len(args) < 4:
+        await update.message.reply_text(
+            "📦 **Tambah Pesanan Custom**\n\n"
+            "Format:\n"
+            "`/addorder <user_id> <reward_coins> <reward_xp> <items>`\n\n"
+            "Contoh items format: `wheat:10,egg:5,bread:3`\n\n"
+            "Contoh lengkap:\n"
+            "`/addorder 123456789 50000 50 wheat:10,egg:5,bread:3`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    try:
+        target_id = int(args[0])
+        reward_coins = int(args[1])
+        reward_xp = int(args[2])
+    except ValueError:
+        await update.message.reply_text("❌ user_id, reward_coins, reward_xp harus angka.")
+        return
+
+    # Parse items (gabungin args[3:] biar bisa di-split dengan spasi atau komma)
+    items_str = " ".join(args[3:])
+    items_dict = {}
+    try:
+        for part in items_str.replace(" ", "").split(","):
+            if not part:
+                continue
+            k, v = part.split(":")
+            items_dict[k.strip().lower()] = int(v)
+    except Exception:
+        await update.message.reply_text(
+            "❌ Format items salah.\n"
+            "Pakai: `item1:qty1,item2:qty2`\n"
+            "Contoh: `wheat:10,egg:5`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    from game.engine import admin_add_custom_order
+    ok, msg = await admin_add_custom_order(target_id, items_dict, reward_coins, reward_xp)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+    # Notif ke target player
+    if ok:
+        try:
+            items_str = ", ".join([f"{v}x {k}" for k, v in items_dict.items()])
+            await ctx.bot.send_message(
+                target_id,
+                f"📦 **PESANAN BARU DARI ADMIN!**\n\n"
+                f"Items: {items_str}\n"
+                f"💵 Reward: Rp{reward_coins:,}\n"
+                f"⭐ XP: {reward_xp}\n\n"
+                f"Cek di 🚚 Pesanan!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
+
+
+@admin_only
+async def addorderall_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Broadcast pesanan custom ke SEMUA player.
+    Format:
+    /addorderall <reward_coins> <reward_xp> <item1:qty1,item2:qty2,...>
+    """
+    args = ctx.args
+    if len(args) < 3:
+        await update.message.reply_text(
+            "📢 **Broadcast Pesanan Custom**\n\n"
+            "Format:\n"
+            "`/addorderall <reward_coins> <reward_xp> <items>`\n\n"
+            "Contoh:\n"
+            "`/addorderall 100000 100 wheat:20,egg:10,milk:5`\n\n"
+            "⚠️ Ini nambah pesanan ke SEMUA player!",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    try:
+        reward_coins = int(args[0])
+        reward_xp = int(args[1])
+    except ValueError:
+        await update.message.reply_text("❌ reward_coins & reward_xp harus angka.")
+        return
+
+    items_str = " ".join(args[2:])
+    items_dict = {}
+    try:
+        for part in items_str.replace(" ", "").split(","):
+            if not part:
+                continue
+            k, v = part.split(":")
+            items_dict[k.strip().lower()] = int(v)
+    except Exception:
+        await update.message.reply_text(
+            "❌ Format items salah. Pakai: `item1:qty1,item2:qty2`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    from game.engine import admin_add_order_to_all
+    count, msg = await admin_add_order_to_all(items_dict, reward_coins, reward_xp)
+    await update.message.reply_text(msg)
+
+    # Notif ke semua player
+    if count > 0:
+        items_display = ", ".join([f"{v}x {k}" for k, v in items_dict.items()])
+        from database.db import get_db, fetchall
+        async with get_db() as db:
+            users = await fetchall(db, "SELECT user_id FROM users")
+        sent = 0
+        for u in users:
+            try:
+                await ctx.bot.send_message(
+                    u["user_id"],
+                    f"🎉 **PESANAN EVENT!**\n\n"
+                    f"Admin baru aja nambah pesanan khusus buat semua player!\n\n"
+                    f"📦 Items: {items_display}\n"
+                    f"💵 Reward: Rp{reward_coins:,}\n"
+                    f"⭐ XP: {reward_xp}\n\n"
+                    f"Cek di 🚚 Pesanan sekarang!",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                sent += 1
+            except Exception:
+                pass
+        await update.message.reply_text(f"📢 Notif terkirim ke {sent}/{count} player.")
