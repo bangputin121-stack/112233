@@ -23,7 +23,7 @@ from handlers.main_handlers import (
     pen_detail_callback, pen_remove_callback, pen_dope_callback,
     transfer_cmd,
     factories_callback, buy_building_callback, factory_detail_callback,
-    upgrade_building_callback,
+    upgrade_building_callback, upgrade_building_confirm_callback,
     produce_callback, collect_callback,
     storage_callback, storage_silo_callback, storage_barn_callback,
     storage_page_callback, sell_menu_callback, sell_callback,
@@ -68,6 +68,8 @@ from handlers.admin_handlers import (
     addtitle_cmd, deltitle_cmd, listtitles_cmd, givetitle_cmd,
     resetuser_cmd, resetall_cmd,
     addorder_cmd, addorderall_cmd,
+    addslot_cmd,
+    event_cmd, stopevent_cmd, listevents_cmd,
 )
 
 load_dotenv()
@@ -153,6 +155,10 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("resetall", resetall_cmd))
     app.add_handler(CommandHandler("addorder", addorder_cmd))
     app.add_handler(CommandHandler("addorderall", addorderall_cmd))
+    app.add_handler(CommandHandler("addslot", addslot_cmd))
+    app.add_handler(CommandHandler("event", event_cmd))
+    app.add_handler(CommandHandler("stopevent", stopevent_cmd))
+    app.add_handler(CommandHandler("listevents", listevents_cmd))
 
     # ─── ADMIN TEXT INPUT (must be before generic message handler) ─────────────
     admin_ids = get_admin_ids()
@@ -206,6 +212,7 @@ def register_handlers(app: Application):
     # Factories
     app.add_handler(CallbackQueryHandler(factories_callback, pattern="^factories$"))
     app.add_handler(CallbackQueryHandler(buy_building_callback, pattern=r"^buy_building_.+$"))
+    app.add_handler(CallbackQueryHandler(upgrade_building_confirm_callback, pattern=r"^upgrade_bldok_.+$"))
     app.add_handler(CallbackQueryHandler(upgrade_building_callback, pattern=r"^upgrade_bld_.+$"))
     app.add_handler(CallbackQueryHandler(factory_detail_callback, pattern=r"^factory_.+$"))
     app.add_handler(CallbackQueryHandler(produce_callback, pattern=r"^produce_.+$"))
