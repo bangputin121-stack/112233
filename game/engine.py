@@ -138,6 +138,14 @@ async def get_item_count(user_id: int, item_key: str) -> int:
         return parse_json_field(row["barn_items"]).get(item_key, 0)
 
 async def add_xp_and_check_level(user_id: int, xp_gain: int) -> tuple[int, bool, int]:
+    # Apply event XP multiplier (kalau ada event aktif)
+    try:
+        _, xp_mult = await get_event_multipliers()
+        if xp_mult > 1.0:
+            xp_gain = int(xp_gain * xp_mult)
+    except Exception:
+        pass  # fungsi belum di-define saat startup, skip
+
     async with get_db() as db:
         row = await fetchone(db, "SELECT xp, level FROM users WHERE user_id = ?", (user_id,))
         old_xp = row["xp"]
@@ -663,6 +671,150 @@ async def buy_building(user_id: int, building_key: str) -> tuple[bool, str]:
         await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (bld["buy_cost"], user_id))
         await db.commit()
         return True, f"✅ {bld['emoji']} {bld['name']} dibangun! Kamu punya {bld['slots']} slot produksi."
+
+async def admin_add_building_slot(target_user_id: int, building_key: str) -> tuple[bool, str]:
+    """Admin nambah 1 slot pabrik ke player. Maksimal 6 slot total.
+    Player harus udah punya pabrik ini.
+    """
+    if building_key not in BUILDINGS:
+        return False, "❓ Bangunan tidak dikenal."
+    bld = BUILDINGS[building_key]
+    MAX_SLOTS = 6
+
+    async with get_db() as db:
+        # Cek user exist
+        u = await fetchone(db, "SELECT user_id FROM users WHERE user_id = ?", (target_user_id,))
+        if not u:
+            return False, f"❌ User `{target_user_id}` tidak terdaftar."
+
+        # Cek player udah punya pabrik ini
+        existing = await fetchall(
+            db,
+            "SELECT slot FROM buildings WHERE user_id = ? AND building = ? ORDER BY slot",
+            (target_user_id, building_key)
+        )
+        if not existing:
+            return False, f"❌ User belum punya {bld['name']}. Mereka harus beli dulu."
+
+        current_slots = len(existing)
+        if current_slots >= MAX_SLOTS:
+            return False, f"🎖️ {bld['name']} udah maksimum ({MAX_SLOTS} slot). Gak bisa nambah lagi."
+
+        # Cari slot number baru (yang belum kepake)
+        used_slots = {e["slot"] for e in existing}
+        new_slot = 0
+        while new_slot in used_slots:
+            new_slot += 1
+
+        await db.execute("""
+            INSERT INTO buildings (user_id, building, slot, status)
+            VALUES (?, ?, ?, 'idle')
+        """, (target_user_id, building_key, new_slot))
+        await db.commit()
+
+    new_total = current_slots + 1
+    return True, (
+        f"✅ Slot pabrik ditambah!\n\n"
+        f"👤 User: `{target_user_id}`\n"
+        f"{bld['emoji']} {bld['name']}\n"
+        f"📦 Slot: {current_slots} → **{new_total}** (max {MAX_SLOTS})"
+    )
+
+
+# ─── EVENT SYSTEM ────────────────────────────────────────────────────────────
+
+async def admin_create_event(
+    name: str, description: str,
+    coin_mult: float, xp_mult: float,
+    duration_hours: int, admin_id: int
+) -> tuple[bool, str, dict]:
+    """Admin bikin event baru dengan multiplier coin/xp."""
+    if coin_mult < 1 or xp_mult < 1:
+        return False, "❌ Multiplier harus minimal 1.0 (1.0 = normal, 2.0 = 2x).", None
+    if duration_hours < 1 or duration_hours > 168:
+        return False, "❌ Durasi harus antara 1-168 jam (max 7 hari).", None
+
+    now = utcnow()
+    ends_at = now + timedelta(hours=duration_hours)
+
+    async with get_db() as db:
+        cursor = await db.execute("""
+            INSERT INTO events (name, description, coin_multiplier, xp_multiplier,
+                                started_at, ends_at, active, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        """, (name, description, coin_mult, xp_mult, now.isoformat(), ends_at.isoformat(), admin_id))
+        event_id = cursor.lastrowid
+        await db.commit()
+
+    return True, (
+        f"✅ Event berhasil dibuat!\n\n"
+        f"🎉 **{name}**\n"
+        f"📝 {description}\n\n"
+        f"💰 Coin multiplier: **{coin_mult}x**\n"
+        f"⭐ XP multiplier: **{xp_mult}x**\n"
+        f"⏰ Durasi: **{duration_hours} jam**\n"
+        f"🏁 Berakhir: {ends_at.strftime('%d %b %Y %H:%M')} UTC"
+    ), {
+        "id": event_id, "name": name, "description": description,
+        "coin_mult": coin_mult, "xp_mult": xp_mult,
+        "duration": duration_hours, "ends_at": ends_at
+    }
+
+
+async def get_active_events() -> list[dict]:
+    """Ambil semua event yang lagi aktif (belum expire)."""
+    now = utcnow()
+    async with get_db() as db:
+        rows = await fetchall(
+            db,
+            "SELECT * FROM events WHERE active = 1 ORDER BY id DESC"
+        )
+    active = []
+    for r in rows:
+        r = dict(r)
+        try:
+            ends_at = datetime.fromisoformat(r["ends_at"])
+            if ends_at.tzinfo is None:
+                ends_at = ends_at.replace(tzinfo=timezone.utc)
+            if now < ends_at:
+                r["_ends_dt"] = ends_at
+                active.append(r)
+            else:
+                # Auto-expire event yang udah lewat waktu
+                async with get_db() as db2:
+                    await db2.execute("UPDATE events SET active = 0 WHERE id = ?", (r["id"],))
+                    await db2.commit()
+        except Exception:
+            pass
+    return active
+
+
+async def get_event_multipliers() -> tuple[float, float]:
+    """Return gabungan multiplier dari semua event aktif.
+    Kalau ada 2 event dengan coin_mult 1.5 dan 2.0, return 3.0 (dikaliin)."""
+    events = await get_active_events()
+    if not events:
+        return 1.0, 1.0
+    coin_total = 1.0
+    xp_total = 1.0
+    for e in events:
+        coin_total *= e.get("coin_multiplier", 1.0)
+        xp_total *= e.get("xp_multiplier", 1.0)
+    return coin_total, xp_total
+
+
+async def admin_stop_event(event_id: int) -> tuple[bool, str]:
+    """Stop event secara manual."""
+    async with get_db() as db:
+        row = await fetchone(db, "SELECT * FROM events WHERE id = ?", (event_id,))
+        if not row:
+            return False, f"❌ Event ID `{event_id}` tidak ditemukan."
+        if not row["active"]:
+            return False, f"❌ Event '{row['name']}' udah tidak aktif."
+        await db.execute("UPDATE events SET active = 0 WHERE id = ?", (event_id,))
+        await db.commit()
+    return True, f"✅ Event '{row['name']}' dihentikan."
+
 
 async def get_building_level(user_id: int, building_key: str) -> int:
     """Ambil level pabrik. Default level 1 kalau belum pernah upgrade."""
@@ -1407,12 +1559,18 @@ async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
     if double == "1":
         total *= 2
 
+    # Apply event multipliers (coin)
+    coin_mult, _ = await get_event_multipliers()
+    if coin_mult > 1.0:
+        total = int(total * coin_mult)
+
     async with get_db() as db:
         await db.execute("UPDATE users SET coins = coins + ?, total_sales = total_sales + 1 WHERE user_id = ?", (total, user_id))
         await db.commit()
 
     emoji = get_item_emoji(item_key)
-    return True, f"✅ Terjual {qty}x {emoji} {get_item_name(item_key)} seharga Rp{total:,}!"
+    event_tag = f" 🎉 (event x{coin_mult})" if coin_mult > 1.0 else ""
+    return True, f"✅ Terjual {qty}x {emoji} {get_item_name(item_key)} seharga Rp{total:,}!{event_tag}"
 
 async def claim_daily(user_id: int) -> tuple[bool, str]:
     """Daily reset di jam 07:00 WIB (UTC+7).
