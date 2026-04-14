@@ -91,7 +91,7 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
     Strategi:
     - Pesan asal udah ada media → edit_media (replace foto in-place, no new msg)
     - Pesan asal teks → delete + send media (sekali aja, transition text→media)
-    - Setelah pesan jadi media, call safe_edit selanjutnya pake edit_caption → no spam.
+    - Caption max 1024 chars (Telegram limit) — kalau lebih, truncate atau split.
 
     photo_id bisa string (legacy = photo) atau dict {kind, file_id} (support GIF).
     """
@@ -112,45 +112,79 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
     if not msg_obj:
         return
 
+    # === HANDLE CAPTION LIMIT ===
+    # Telegram caption max = 1024 chars (beda dari text msg = 4096)
+    # Kalau text kepanjangan, truncate caption + kirim sisanya sebagai text msg
+    CAPTION_MAX = 1020  # buffer 4 chars
+    overflow_text = None
+    caption = text
+    if len(text) > CAPTION_MAX:
+        # Cari titik potong yang bagus (newline atau spasi)
+        cut = text.rfind("\n", 0, CAPTION_MAX)
+        if cut < CAPTION_MAX // 2:  # kalau nggak nemu newline yang bagus
+            cut = text.rfind(" ", 0, CAPTION_MAX)
+        if cut < CAPTION_MAX // 2:
+            cut = CAPTION_MAX
+        caption = text[:cut].rstrip() + "\n\n_(lanjut di bawah ⬇️)_"
+        overflow_text = text[cut:].strip()
+
     from telegram import InputMediaPhoto, InputMediaAnimation
     has_media = bool(msg_obj.photo or msg_obj.animation or msg_obj.video)
+    bot = msg_obj.get_bot()
+    chat_id = msg_obj.chat_id
 
     # Case 1: Pesan asal udah ada media → edit_media (NO SPAM)
     if has_media:
         try:
             if kind == "animation":
                 new_media = InputMediaAnimation(
-                    media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
+                    media=file_id, caption=caption, parse_mode=ParseMode.MARKDOWN
                 )
             else:
                 new_media = InputMediaPhoto(
-                    media=file_id, caption=text, parse_mode=ParseMode.MARKDOWN
+                    media=file_id, caption=caption, parse_mode=ParseMode.MARKDOWN
                 )
             await msg_obj.edit_media(media=new_media, reply_markup=keyboard)
+            # Kirim overflow kalau ada
+            if overflow_text:
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id, text=overflow_text,
+                        parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True
+                    )
+                except Exception:
+                    pass
             return
         except Exception as e:
-            if "not modified" in str(e).lower():
-                # Same media, just edit caption
+            err_str = str(e).lower()
+            if "not modified" in err_str:
                 try:
                     await msg_obj.edit_caption(
-                        caption=text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                        caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
                     )
+                    if overflow_text:
+                        await bot.send_message(
+                            chat_id=chat_id, text=overflow_text,
+                            parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True
+                        )
                 except Exception:
                     pass
                 return
             logger.error(f"edit_media failed: {e}")
-            # Fall through to text edit (no spam)
             try:
                 await msg_obj.edit_caption(
-                    caption=text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
+                    caption=caption, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
                 )
+                if overflow_text:
+                    await bot.send_message(
+                        chat_id=chat_id, text=overflow_text,
+                        parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True
+                    )
             except Exception:
                 pass
             return
 
-    # Case 2: Pesan asal teks → harus delete + send (sekali, transition)
-    bot = msg_obj.get_bot()
-    chat_id = msg_obj.chat_id
+    # Case 2: Pesan asal teks → delete + send media (sekali, transition)
     try:
         await msg_obj.delete()
     except Exception:
@@ -158,16 +192,33 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
     try:
         if kind == "animation":
             await bot.send_animation(
-                chat_id=chat_id, animation=file_id, caption=text,
+                chat_id=chat_id, animation=file_id, caption=caption,
                 reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
             )
         else:
             await bot.send_photo(
-                chat_id=chat_id, photo=file_id, caption=text,
+                chat_id=chat_id, photo=file_id, caption=caption,
                 reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
             )
+        # Kirim overflow kalau ada
+        if overflow_text:
+            try:
+                await bot.send_message(
+                    chat_id=chat_id, text=overflow_text,
+                    parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True
+                )
+            except Exception:
+                pass
     except Exception as e:
         logger.error(f"send media after delete failed: {e}")
+        # Last resort: kirim teks lengkap aja biar player nggak liat chat kosong
+        try:
+            await bot.send_message(
+                chat_id=chat_id, text=text, reply_markup=keyboard,
+                parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True
+            )
+        except Exception as e2:
+            logger.error(f"final fallback also failed: {e2}")
 
 
 # ─── START / MENU ─────────────────────────────────────────────────────────────
@@ -650,9 +701,50 @@ async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     slots = [b for b in buildings if b["building"] == building_key]
 
     from game.data import BUILDINGS
+    from game.engine import get_building_level
     bld = BUILDINGS.get(building_key, {})
-    text = f"{bld.get('emoji','🏭')} **{bld.get('name','Factory')}**\n\nPilih resep untuk diproduksi:"
+    bld_level = await get_building_level(user.id, building_key)
+    reduction = (bld_level - 1) * 15
+    level_info = ""
+    if bld_level > 1:
+        level_info = f"\n📈 Level: **{bld_level}** (-{reduction}% waktu produksi)"
+    else:
+        level_info = "\n📈 Level: **1** (belum di-upgrade)"
+
+    text = (
+        f"{bld.get('emoji','🏭')} **{bld.get('name','Factory')}**"
+        f"{level_info}\n\n"
+        f"Pilih resep untuk diproduksi:"
+    )
     await safe_edit(query, text, factory_detail_keyboard(building_key, slots))
+
+
+async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler upgrade pabrik. Format: upgrade_bld_<building_key>"""
+    query = update.callback_query
+    payload = query.data[len("upgrade_bld_"):]
+    from game.data import BUILDINGS
+    if payload not in BUILDINGS:
+        await query.answer("❌ Bangunan tidak dikenali", show_alert=True)
+        return
+    user = query.from_user
+    from game.engine import upgrade_building, get_building_level
+    ok, msg = await upgrade_building(user.id, payload)
+    await query.answer(msg, show_alert=True)
+    if ok:
+        # Refresh factory detail
+        buildings = await get_user_buildings(user.id)
+        slots = [b for b in buildings if b["building"] == payload]
+        bld = BUILDINGS[payload]
+        bld_level = await get_building_level(user.id, payload)
+        reduction = (bld_level - 1) * 15
+        text = (
+            f"{bld.get('emoji','🏭')} **{bld.get('name','Factory')}**\n"
+            f"📈 Level: **{bld_level}** (-{reduction}% waktu produksi)\n\n"
+            f"Pilih resep untuk diproduksi:"
+        )
+        await safe_edit(query, text, factory_detail_keyboard(payload, slots))
+
 
 async def produce_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -859,7 +951,9 @@ async def orders_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     await ensure_orders(user.id, db_user["level"])
     orders = await get_orders(user.id)
-    text = fmt_orders(orders)
+    silo = parse_json_field(db_user["silo_items"])
+    barn = parse_json_field(db_user["barn_items"])
+    text = fmt_orders(orders, silo, barn)
     await safe_edit(query, text, orders_keyboard(orders))
 
 async def orders_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -867,7 +961,9 @@ async def orders_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     await ensure_orders(user.id, db_user["level"])
     orders = await get_orders(user.id)
-    text = fmt_orders(orders)
+    silo = parse_json_field(db_user["silo_items"])
+    barn = parse_json_field(db_user["barn_items"])
+    text = fmt_orders(orders, silo, barn)
     await safe_send(update, text, orders_keyboard(orders))
 
 async def fulfill_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -879,7 +975,9 @@ async def fulfill_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         db_user = await get_user_full(user.id)
         await ensure_orders(user.id, db_user["level"])
         orders = await get_orders(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_orders(orders), orders_keyboard(orders))
+        silo = parse_json_field(db_user["silo_items"])
+        barn = parse_json_field(db_user["barn_items"])
+        await safe_edit(query, msg + "\n\n" + fmt_orders(orders, silo, barn), orders_keyboard(orders))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -890,7 +988,10 @@ async def refresh_orders_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     ok, msg = await refresh_orders(user.id, db_user["level"])
     if ok:
         orders = await get_orders(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_orders(orders), orders_keyboard(orders))
+        db_user2 = await get_user_full(user.id)
+        silo = parse_json_field(db_user2["silo_items"])
+        barn = parse_json_field(db_user2["barn_items"])
+        await safe_edit(query, msg + "\n\n" + fmt_orders(orders, silo, barn), orders_keyboard(orders))
     else:
         await query.answer(msg, show_alert=True)
 
