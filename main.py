@@ -54,6 +54,7 @@ from handlers.admin_handlers import (
     adm_setcoins_callback, adm_setlevel_callback, adm_setgems_callback,
     adm_giveitem_callback, adm_give2_callback, adm_resetuser_callback,
     adm_broadcast_callback, adm_logs_callback,
+    adm_broadcast_confirm_callback, adm_broadcast_cancel_callback,
     adm_items_callback, adm_addcrop_callback,
     adm_give_callback, adm_text_input,
     give_cmd, givecoins_cmd, setphoto_cmd, viewphoto_cmd, delphoto_cmd,
@@ -156,6 +157,9 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("addorder", addorder_cmd))
     app.add_handler(CommandHandler("addorderall", addorderall_cmd))
     app.add_handler(CommandHandler("addslot", addslot_cmd))
+    app.add_handler(CommandHandler("event", event_cmd))
+    app.add_handler(CommandHandler("stopevent", stopevent_cmd))
+    app.add_handler(CommandHandler("listevents", listevents_cmd))
     app.add_handler(CommandHandler("event", event_cmd))
     app.add_handler(CommandHandler("stopevent", stopevent_cmd))
     app.add_handler(CommandHandler("listevents", listevents_cmd))
@@ -290,6 +294,8 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(adm_give2_callback, pattern=r"^adm_give2_\d+_.+$"))
     app.add_handler(CallbackQueryHandler(adm_resetuser_callback, pattern=r"^adm_resetuser_\d+$"))
     app.add_handler(CallbackQueryHandler(adm_broadcast_callback, pattern="^adm_broadcast$"))
+    app.add_handler(CallbackQueryHandler(adm_broadcast_confirm_callback, pattern="^adm_broadcast_confirm$"))
+    app.add_handler(CallbackQueryHandler(adm_broadcast_cancel_callback, pattern="^adm_broadcast_cancel$"))
     app.add_handler(CallbackQueryHandler(adm_logs_callback, pattern="^adm_logs$"))
     app.add_handler(CallbackQueryHandler(adm_items_callback, pattern="^adm_items$"))
     app.add_handler(CallbackQueryHandler(adm_addcrop_callback, pattern="^adm_addcrop$"))
