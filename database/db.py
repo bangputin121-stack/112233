@@ -91,6 +91,12 @@ async def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER,
             action TEXT, target_id INTEGER, details TEXT,
             created_at TEXT DEFAULT (datetime('now')))""")
+        # Level pabrik per player per building (buat fitur upgrade pabrik)
+        await db.execute("""CREATE TABLE IF NOT EXISTS building_levels (
+            user_id INTEGER NOT NULL, building TEXT NOT NULL,
+            level INTEGER DEFAULT 1,
+            PRIMARY KEY (user_id, building),
+            FOREIGN KEY(user_id) REFERENCES users(user_id))""")
         await db.execute("""CREATE TABLE IF NOT EXISTS game_settings (
             key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
         await db.execute("""INSERT OR IGNORE INTO game_settings (key, value) VALUES
