@@ -23,6 +23,7 @@ from handlers.main_handlers import (
     pen_detail_callback, pen_remove_callback, pen_dope_callback,
     transfer_cmd,
     factories_callback, buy_building_callback, factory_detail_callback,
+    upgrade_building_callback,
     produce_callback, collect_callback,
     storage_callback, storage_silo_callback, storage_barn_callback,
     storage_page_callback, sell_menu_callback, sell_callback,
@@ -66,6 +67,7 @@ from handlers.admin_handlers import (
     addrecipe_cmd, delrecipe_cmd, listrecipes_cmd,
     addtitle_cmd, deltitle_cmd, listtitles_cmd, givetitle_cmd,
     resetuser_cmd, resetall_cmd,
+    addorder_cmd, addorderall_cmd,
 )
 
 load_dotenv()
@@ -149,6 +151,8 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("users", users_cmd))
     app.add_handler(CommandHandler("resetuser", resetuser_cmd))
     app.add_handler(CommandHandler("resetall", resetall_cmd))
+    app.add_handler(CommandHandler("addorder", addorder_cmd))
+    app.add_handler(CommandHandler("addorderall", addorderall_cmd))
 
     # ─── ADMIN TEXT INPUT (must be before generic message handler) ─────────────
     admin_ids = get_admin_ids()
@@ -202,6 +206,7 @@ def register_handlers(app: Application):
     # Factories
     app.add_handler(CallbackQueryHandler(factories_callback, pattern="^factories$"))
     app.add_handler(CallbackQueryHandler(buy_building_callback, pattern=r"^buy_building_.+$"))
+    app.add_handler(CallbackQueryHandler(upgrade_building_callback, pattern=r"^upgrade_bld_.+$"))
     app.add_handler(CallbackQueryHandler(factory_detail_callback, pattern=r"^factory_.+$"))
     app.add_handler(CallbackQueryHandler(produce_callback, pattern=r"^produce_.+$"))
     app.add_handler(CallbackQueryHandler(collect_callback, pattern=r"^collect_.+$"))
