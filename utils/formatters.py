@@ -136,7 +136,9 @@ def fmt_factories(user: dict, buildings: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def fmt_orders(orders: list[dict]) -> str:
+def fmt_orders(orders: list[dict], silo: dict = None, barn: dict = None) -> str:
+    """Tampilin pesanan + stok player per item (biar nggak perlu bolak-balik ke gudang).
+    silo & barn adalah dict item player, optional."""
     import json
     lines = [
         "🚚 **Pesanan Pengiriman**",
@@ -149,18 +151,37 @@ def fmt_orders(orders: list[dict]) -> str:
         lines.append("Tidak ada pesanan aktif. Cek lagi nanti!")
         return "\n".join(lines)
 
+    # Gabungin stock silo + barn buat lookup cepet
+    stock = {}
+    if silo:
+        for k, v in silo.items():
+            stock[k] = stock.get(k, 0) + v
+    if barn:
+        for k, v in barn.items():
+            stock[k] = stock.get(k, 0) + v
+
     for i, order in enumerate(orders, 1):
         items = json.loads(order["items"])
-        item_parts = []
+        item_lines = []
+        all_ok = True
         for item_key, qty in items.items():
             emoji = get_item_emoji(item_key)
             name = get_item_name(item_key)
-            item_parts.append(f"{qty}x {emoji} {name}")
-        lines.append(f"📦 **#{i}** — {' + '.join(item_parts)}")
+            have = stock.get(item_key, 0)
+            if have >= qty:
+                mark = "✅"
+            else:
+                mark = "❌"
+                all_ok = False
+            item_lines.append(f"     {mark} {qty}x {emoji} {name} (punya: {have})")
+
+        status_emoji = "🟢" if all_ok else "🔴"
+        lines.append(f"{status_emoji} **#{i}**")
+        lines.extend(item_lines)
         lines.append(f"     💵 Rp{order['reward_coins']:,} | ⭐ {order['reward_xp']} XP")
         lines.append("")
 
-    lines.append("_Ketuk pesanan di bawah untuk kirim._")
+    lines.append("_🟢 = bahan cukup, 🔴 = bahan kurang_")
     return "\n".join(lines)
 
 
