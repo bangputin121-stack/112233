@@ -97,6 +97,17 @@ async def init_db():
             level INTEGER DEFAULT 1,
             PRIMARY KEY (user_id, building),
             FOREIGN KEY(user_id) REFERENCES users(user_id))""")
+        # Event system (admin-managed bonus events)
+        await db.execute("""CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            coin_multiplier REAL DEFAULT 1.0,
+            xp_multiplier REAL DEFAULT 1.0,
+            started_at TEXT DEFAULT (datetime('now')),
+            ends_at TEXT NOT NULL,
+            active INTEGER DEFAULT 1,
+            created_by INTEGER)""")
         await db.execute("""CREATE TABLE IF NOT EXISTS game_settings (
             key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
         await db.execute("""INSERT OR IGNORE INTO game_settings (key, value) VALUES
