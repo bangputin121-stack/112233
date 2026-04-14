@@ -2148,3 +2148,216 @@ async def addorderall_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
         await update.message.reply_text(f"📢 Notif terkirim ke {sent}/{count} player.")
+
+
+# ─── ADMIN: ADD BUILDING SLOT ────────────────────────────────────────────────
+
+@admin_only
+async def addslot_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Nambahin slot pabrik ke player. Max 6 slot.
+    Format: /addslot <user_id> <building_key>
+
+    Contoh: /addslot 123456789 bakery
+    """
+    args = ctx.args
+    if len(args) < 2:
+        from game.data import BUILDINGS
+        bld_list = ", ".join(f"`{k}`" for k in BUILDINGS.keys())
+        await update.message.reply_text(
+            "📦 **Tambah Slot Pabrik**\n\n"
+            "Format:\n"
+            "`/addslot <user_id> <building_key>`\n\n"
+            "Contoh:\n"
+            "`/addslot 123456789 bakery`\n\n"
+            f"**Building keys:** {bld_list}\n\n"
+            "⚠️ Max 6 slot per pabrik per player.\n"
+            "⚠️ Player harus udah punya pabrik ini dulu.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ user_id harus angka.")
+        return
+
+    building_key = args[1].lower().strip()
+
+    from game.engine import admin_add_building_slot
+    ok, msg = await admin_add_building_slot(target_id, building_key)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+    # Notif ke target player kalau sukses
+    if ok:
+        try:
+            from game.data import BUILDINGS
+            bld = BUILDINGS.get(building_key, {})
+            await ctx.bot.send_message(
+                target_id,
+                f"🎁 **SLOT PABRIK BARU DARI ADMIN!**\n\n"
+                f"{bld.get('emoji','🏭')} **{bld.get('name','Pabrik')}** dapet +1 slot produksi!\n\n"
+                f"Cek di 🏭 Pabrik sekarang, kamu bisa produksi lebih banyak barang barengan!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            pass
+
+
+# ─── ADMIN: EVENT SYSTEM ─────────────────────────────────────────────────────
+
+@admin_only
+async def event_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Bikin event bonus multiplier coin/xp.
+    Format:
+    /event <coin_mult> <xp_mult> <duration_hours> <name> | <description>
+
+    Contoh:
+    /event 2 2 24 Weekend Bonus | Double Rp & XP buat weekend!
+    /event 1.5 3 12 XP Rush | XP 3x selama 12 jam
+    """
+    args_raw = " ".join(ctx.args) if ctx.args else ""
+    if not args_raw or "|" not in args_raw:
+        await update.message.reply_text(
+            "🎉 **Bikin Event Baru**\n\n"
+            "Format:\n"
+            "`/event <coin_mult> <xp_mult> <jam> <nama> | <deskripsi>`\n\n"
+            "Contoh:\n"
+            "`/event 2 2 24 Weekend Bonus | Double Rp & XP selama 24 jam!`\n"
+            "`/event 1.5 3 12 XP Rush | XP 3x selama 12 jam`\n\n"
+            "⚠️ Multiplier harus ≥ 1.0\n"
+            "⚠️ Durasi max 168 jam (7 hari)",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    # Split di tanda | untuk pisahin header dari description
+    header_part, _, description = args_raw.partition("|")
+    description = description.strip() or "Event bonus dari admin"
+
+    parts = header_part.strip().split(None, 3)
+    if len(parts) < 4:
+        await update.message.reply_text(
+            "❌ Format salah.\n"
+            "Contoh: `/event 2 2 24 Weekend Bonus | Double Rp & XP!`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    try:
+        coin_mult = float(parts[0])
+        xp_mult = float(parts[1])
+        duration = int(parts[2])
+        name = parts[3].strip()
+    except ValueError:
+        await update.message.reply_text(
+            "❌ coin_mult & xp_mult harus angka (desimal), duration harus angka bulat."
+        )
+        return
+
+    if not name:
+        await update.message.reply_text("❌ Nama event gak boleh kosong.")
+        return
+
+    from game.engine import admin_create_event
+    admin_user = update.effective_user
+    ok, msg, event_info = await admin_create_event(
+        name, description, coin_mult, xp_mult, duration, admin_user.id
+    )
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+    # Broadcast notif ke semua player
+    if ok:
+        from database.db import get_db, fetchall
+        async with get_db() as db:
+            users = await fetchall(db, "SELECT user_id FROM users")
+
+        notif_text = (
+            f"🎉 **EVENT DIMULAI!**\n\n"
+            f"**{name}**\n"
+            f"_{description}_\n\n"
+            f"💰 Coin: **{coin_mult}x**\n"
+            f"⭐ XP: **{xp_mult}x**\n"
+            f"⏰ Durasi: **{duration} jam**\n\n"
+            f"Buruan main sekarang! Bonus jalan otomatis 🚀"
+        )
+        sent = 0
+        for u in users:
+            try:
+                await ctx.bot.send_message(
+                    u["user_id"], notif_text, parse_mode=ParseMode.MARKDOWN
+                )
+                sent += 1
+            except Exception:
+                pass
+        await update.message.reply_text(f"📢 Notif event terkirim ke {sent}/{len(users)} player.")
+
+
+@admin_only
+async def stopevent_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Stop event secara manual. Format: /stopevent <event_id>"""
+    args = ctx.args
+    if len(args) < 1:
+        await update.message.reply_text(
+            "🛑 **Stop Event**\n\n"
+            "Format: `/stopevent <event_id>`\n"
+            "Cek ID event pake `/listevents`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    try:
+        event_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ event_id harus angka.")
+        return
+
+    from game.engine import admin_stop_event
+    ok, msg = await admin_stop_event(event_id)
+    await update.message.reply_text(msg)
+
+    # Broadcast notif pas event stop
+    if ok:
+        from database.db import get_db, fetchall
+        async with get_db() as db:
+            users = await fetchall(db, "SELECT user_id FROM users")
+        for u in users:
+            try:
+                await ctx.bot.send_message(
+                    u["user_id"],
+                    f"🏁 **Event Berakhir**\n\n{msg}\n\nTerima kasih udah ikut event!",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception:
+                pass
+
+
+@admin_only
+async def listevents_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """List event yang lagi aktif."""
+    from game.engine import get_active_events
+    events = await get_active_events()
+    if not events:
+        await update.message.reply_text("📭 Tidak ada event aktif.")
+        return
+
+    lines = ["🎉 **Event Aktif**\n"]
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    for e in events:
+        ends = e.get("_ends_dt")
+        if ends:
+            remaining = ends - now
+            hours = int(remaining.total_seconds() // 3600)
+            minutes = int((remaining.total_seconds() % 3600) // 60)
+            time_left = f"{hours}h {minutes}m"
+        else:
+            time_left = "?"
+        lines.append(
+            f"**ID {e['id']}** — {e['name']}\n"
+            f"  💰 Coin: {e['coin_multiplier']}x | ⭐ XP: {e['xp_multiplier']}x\n"
+            f"  ⏰ Sisa: {time_left}\n"
+        )
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
