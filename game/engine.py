@@ -664,6 +664,95 @@ async def buy_building(user_id: int, building_key: str) -> tuple[bool, str]:
         await db.commit()
         return True, f"✅ {bld['emoji']} {bld['name']} dibangun! Kamu punya {bld['slots']} slot produksi."
 
+async def get_building_level(user_id: int, building_key: str) -> int:
+    """Ambil level pabrik. Default level 1 kalau belum pernah upgrade."""
+    async with get_db() as db:
+        row = await fetchone(
+            db,
+            "SELECT level FROM building_levels WHERE user_id = ? AND building = ?",
+            (user_id, building_key)
+        )
+    return row["level"] if row else 1
+
+
+async def get_all_building_levels(user_id: int) -> dict:
+    """Ambil semua level pabrik user, return dict {building_key: level}."""
+    async with get_db() as db:
+        rows = await fetchall(db, "SELECT building, level FROM building_levels WHERE user_id = ?", (user_id,))
+    return {r["building"]: r["level"] for r in rows}
+
+
+async def upgrade_building(user_id: int, building_key: str) -> tuple[bool, str]:
+    """Upgrade level pabrik. Tiap level nambah -15% waktu cooldown. Max level 10.
+    Biaya upgrade = base_cost × (current_level × 1.5)
+    """
+    if building_key not in BUILDINGS:
+        return False, "❌ Bangunan tidak dikenal."
+    bld = BUILDINGS[building_key]
+
+    current_level = await get_building_level(user_id, building_key)
+    MAX_LEVEL = 10
+
+    if current_level >= MAX_LEVEL:
+        return False, f"🎖️ {bld['name']} udah level maksimum ({MAX_LEVEL})."
+
+    async with get_db() as db:
+        # Cek player punya building ini
+        owned = await fetchone(
+            db,
+            "SELECT COUNT(*) as cnt FROM buildings WHERE user_id = ? AND building = ?",
+            (user_id, building_key)
+        )
+        if not owned or owned["cnt"] == 0:
+            return False, f"❌ Kamu belum punya {bld['name']}. Beli dulu!"
+
+        # Hitung biaya upgrade
+        base_cost = bld["buy_cost"]
+        upgrade_cost = int(base_cost * current_level * 1.5)
+
+        user = await fetchone(db, "SELECT coins FROM users WHERE user_id = ?", (user_id,))
+        if user["coins"] < upgrade_cost:
+            kurang = upgrade_cost - user["coins"]
+            return False, (
+                f"💸 SALDO TIDAK CUKUP!\n\n"
+                f"Butuh: Rp{upgrade_cost:,}\n"
+                f"Punya: Rp{user['coins']:,}\n"
+                f"Kurang: Rp{kurang:,}"
+            )
+
+        # Upgrade
+        new_level = current_level + 1
+        await db.execute(
+            "INSERT OR REPLACE INTO building_levels (user_id, building, level) VALUES (?, ?, ?)",
+            (user_id, building_key, new_level)
+        )
+        await db.execute(
+            "UPDATE users SET coins = coins - ? WHERE user_id = ?",
+            (upgrade_cost, user_id)
+        )
+        await db.commit()
+
+    # Hitung reduksi cooldown total
+    reduction_percent = min(new_level - 1, MAX_LEVEL - 1) * 15
+    return True, (
+        f"✅ {bld['emoji']} {bld['name']} di-upgrade!\n\n"
+        f"📈 Level: {current_level} → **{new_level}**\n"
+        f"⚡ Cooldown produksi: -{reduction_percent}%\n"
+        f"💵 Biaya: Rp{upgrade_cost:,}"
+    )
+
+
+def _apply_cooldown_reduction(base_time: int, level: int) -> int:
+    """Kurangin waktu cooldown berdasarkan level pabrik.
+    Level 1 = 0% (normal), Level 2 = -15%, Level 3 = -30%, dst.
+    Max reduction 85% (level 10 = -135% dicap jadi -85%)."""
+    if level <= 1:
+        return base_time
+    reduction = (level - 1) * 0.15
+    reduction = min(reduction, 0.85)  # max reduksi 85%
+    return int(base_time * (1 - reduction))
+
+
 async def start_production(user_id: int, building_key: str, recipe_key: str) -> tuple[bool, str]:
     if building_key not in BUILDINGS:
         return False, "❓ Bangunan tidak dikenal."
@@ -695,7 +784,10 @@ async def start_production(user_id: int, building_key: str, recipe_key: str) -> 
             await remove_from_inventory(user_id, ing, qty)
 
         now = utcnow()
-        ready_at = now + timedelta(seconds=recipe["time"])
+        # Apply cooldown reduction dari level pabrik
+        bld_level = await get_building_level(user_id, building_key)
+        actual_time = _apply_cooldown_reduction(recipe["time"], bld_level)
+        ready_at = now + timedelta(seconds=actual_time)
         await db.execute("""
             UPDATE buildings SET item=?, started_at=?, ready_at=?, status='producing'
             WHERE user_id=? AND building=? AND slot=?
@@ -703,7 +795,8 @@ async def start_production(user_id: int, building_key: str, recipe_key: str) -> 
         await db.commit()
 
         out_emoji = PROCESSED_EMOJI.get(recipe_key, "📦")
-        return True, f"✅ {out_emoji} {get_item_name(recipe_key)} production started! Siap dalam {fmt_time(recipe['time'])}."
+        level_hint = f" (Lv{bld_level})" if bld_level > 1 else ""
+        return True, f"✅ {out_emoji} {get_item_name(recipe_key)} production started!{level_hint} Siap dalam {fmt_time(actual_time)}."
 
 async def collect_production(user_id: int, building_key: str, slot: int) -> tuple[bool, str]:
     async with get_db() as db:
@@ -745,6 +838,101 @@ async def collect_production(user_id: int, building_key: str, slot: int) -> tupl
 # ─── ORDERS ──────────────────────────────────────────────────────────────────
 
 import random as _random
+
+async def admin_add_custom_order(target_user_id: int, items_dict: dict, reward_coins: int, reward_xp: int) -> tuple[bool, str]:
+    """Admin nambah pesanan custom ke player tertentu.
+    items_dict = {"wheat": 5, "egg": 3}
+    """
+    if not items_dict:
+        return False, "❌ Items tidak boleh kosong."
+    if reward_coins <= 0 or reward_xp < 0:
+        return False, "❌ Reward harus positif."
+
+    # Validasi item exist di CROPS/BUILDINGS/ANIMALS/CUSTOM
+    from game.data import CUSTOM_ANIMAL_PRODUCTS
+    valid_items = set()
+    valid_items.update(CROPS.keys())
+    valid_items.update(CUSTOM_ANIMAL_PRODUCTS.keys())
+    # Animal products
+    for a in ANIMALS.values():
+        valid_items.add(a.get("product", ""))
+    # Building recipes
+    for b in BUILDINGS.values():
+        valid_items.update(b["recipes"].keys())
+
+    invalid = [k for k in items_dict.keys() if k not in valid_items]
+    if invalid:
+        return False, f"❌ Item tidak dikenal: {', '.join(invalid)}"
+
+    async with get_db() as db:
+        # Cek user ada
+        u = await fetchone(db, "SELECT user_id FROM users WHERE user_id = ?", (target_user_id,))
+        if not u:
+            return False, f"❌ User `{target_user_id}` tidak terdaftar."
+
+        # Cari slot kosong (slot 9+ buat custom, biar nggak tabrakan sama 9 slot default)
+        existing = await fetchall(db, "SELECT slot FROM orders WHERE user_id = ? ORDER BY slot", (target_user_id,))
+        used_slots = {r["slot"] for r in existing}
+        new_slot = 9
+        while new_slot in used_slots:
+            new_slot += 1
+
+        await db.execute("""
+            INSERT INTO orders (user_id, slot, items, reward_coins, reward_xp, status)
+            VALUES (?, ?, ?, ?, ?, 'active')
+        """, (target_user_id, new_slot, dump_json_field(items_dict), reward_coins, reward_xp))
+        await db.commit()
+
+    items_str = ", ".join([f"{v}x {k}" for k, v in items_dict.items()])
+    return True, (
+        f"✅ Pesanan custom ditambah ke user `{target_user_id}`!\n\n"
+        f"📦 Items: {items_str}\n"
+        f"💵 Reward: Rp{reward_coins:,}\n"
+        f"⭐ XP: {reward_xp}\n"
+        f"🪧 Slot: {new_slot}"
+    )
+
+
+async def admin_add_order_to_all(items_dict: dict, reward_coins: int, reward_xp: int) -> tuple[int, str]:
+    """Admin broadcast pesanan custom ke SEMUA player.
+    Return jumlah player yang dapet pesanan.
+    """
+    if not items_dict:
+        return 0, "❌ Items tidak boleh kosong."
+
+    # Validasi item
+    from game.data import CUSTOM_ANIMAL_PRODUCTS
+    valid_items = set()
+    valid_items.update(CROPS.keys())
+    valid_items.update(CUSTOM_ANIMAL_PRODUCTS.keys())
+    for a in ANIMALS.values():
+        valid_items.add(a.get("product", ""))
+    for b in BUILDINGS.values():
+        valid_items.update(b["recipes"].keys())
+
+    invalid = [k for k in items_dict.keys() if k not in valid_items]
+    if invalid:
+        return 0, f"❌ Item tidak dikenal: {', '.join(invalid)}"
+
+    async with get_db() as db:
+        users = await fetchall(db, "SELECT user_id FROM users")
+        count = 0
+        for u in users:
+            uid = u["user_id"]
+            existing = await fetchall(db, "SELECT slot FROM orders WHERE user_id = ? ORDER BY slot", (uid,))
+            used_slots = {r["slot"] for r in existing}
+            new_slot = 9
+            while new_slot in used_slots:
+                new_slot += 1
+            await db.execute("""
+                INSERT INTO orders (user_id, slot, items, reward_coins, reward_xp, status)
+                VALUES (?, ?, ?, ?, ?, 'active')
+            """, (uid, new_slot, dump_json_field(items_dict), reward_coins, reward_xp))
+            count += 1
+        await db.commit()
+
+    return count, f"✅ Pesanan custom berhasil ditambah ke {count} player!"
+
 
 def _generate_order(user_level: int) -> dict:
     all_items = []
