@@ -39,15 +39,46 @@ logger = logging.getLogger(__name__)
 async def safe_edit(query, text: str, keyboard=None, parse_mode=ParseMode.MARKDOWN):
     """Edit pesan dari callback. Pinter handle media vs text:
     - Pesan teks → edit_message_text
-    - Pesan punya media (foto/gif) → edit_message_caption (text di caption)
+    - Pesan punya media + text ≤ 1024 → edit_message_caption
+    - Pesan punya media + text > 1024 → delete media + send new text (transisi)
     JANGAN pernah spam reply_text — kalau gagal, tuliskan log doang.
     """
     msg = query.message if hasattr(query, "message") else None
     has_media = bool(msg and (msg.photo or msg.animation or msg.video or msg.document))
 
+    # Telegram caption max = 1024, text msg max = 4096
+    CAPTION_MAX = 1020
+
+    # Kalau pesan punya media TAPI text baru kepanjangan buat caption,
+    # delete pesan media + kirim text baru. Setelah ini pesan jadi text.
+    if has_media and len(text) > CAPTION_MAX:
+        try:
+            bot = msg.get_bot()
+            chat_id = msg.chat_id
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            await bot.send_message(
+                chat_id=chat_id, text=text, reply_markup=keyboard,
+                parse_mode=parse_mode, disable_web_page_preview=True
+            )
+            return
+        except Exception as e:
+            logger.error(f"safe_edit media-to-text conversion failed: {e}")
+            # Jangan throw, coba fallback edit_caption dengan text ke-potong
+            try:
+                truncated = text[:CAPTION_MAX - 30] + "\n\n_(terlalu panjang)_"
+                await query.edit_message_caption(
+                    caption=truncated, reply_markup=keyboard, parse_mode=parse_mode
+                )
+            except Exception:
+                pass
+            return
+
     try:
         if has_media:
-            # Pesan punya media — edit caption-nya, JANGAN pake edit_message_text
+            # Pesan punya media, text muat di caption (≤ 1020)
             await query.edit_message_caption(
                 caption=text, reply_markup=keyboard, parse_mode=parse_mode
             )
@@ -59,11 +90,21 @@ async def safe_edit(query, text: str, keyboard=None, parse_mode=ParseMode.MARKDO
             )
         return
     except Exception as e:
+        err_str = str(e).lower()
         # Telegram lemparan "Message is not modified" itu normal — abaikan
-        if "not modified" in str(e).lower():
+        if "not modified" in err_str:
             return
-        logger.error(f"safe_edit failed (no fallback to reply_text): {e}")
-        # NO FALLBACK ke reply_text — biar nggak spam chat
+        # Kalau error caption too long (rare setelah guard di atas), coba truncate
+        if "caption is too long" in err_str and has_media:
+            try:
+                truncated = text[:CAPTION_MAX - 30] + "\n\n_(dipotong)_"
+                await query.edit_message_caption(
+                    caption=truncated, reply_markup=keyboard, parse_mode=parse_mode
+                )
+                return
+            except Exception:
+                pass
+        logger.error(f"safe_edit failed: {e}")
 
 async def safe_send(update: Update, text: str, keyboard=None):
     try:
