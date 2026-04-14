@@ -761,9 +761,64 @@ async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 
 
 async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Handler upgrade pabrik. Format: upgrade_bld_<building_key>"""
+    """Show upgrade confirmation with cost breakdown. Format: upgrade_bld_<building_key>"""
     query = update.callback_query
+    await query.answer()
     payload = query.data[len("upgrade_bld_"):]
+    from game.data import BUILDINGS
+    if payload not in BUILDINGS:
+        await query.answer("❌ Bangunan tidak dikenali", show_alert=True)
+        return
+    user = query.from_user
+    from game.engine import get_building_level
+    bld = BUILDINGS[payload]
+    current_level = await get_building_level(user.id, payload)
+    MAX_LEVEL = 10
+
+    if current_level >= MAX_LEVEL:
+        await query.answer(
+            f"🎖️ {bld['name']} udah level maksimum ({MAX_LEVEL}).",
+            show_alert=True
+        )
+        return
+
+    # Hitung biaya & efek
+    base_cost = bld["buy_cost"]
+    upgrade_cost = int(base_cost * current_level * 1.5)
+    new_level = current_level + 1
+    current_reduction = (current_level - 1) * 15
+    new_reduction = (new_level - 1) * 15
+
+    db_user = await get_user_full(user.id)
+    saldo = db_user["coins"]
+    cukup = "✅" if saldo >= upgrade_cost else "❌"
+
+    text = (
+        f"⬆️ **KONFIRMASI UPGRADE PABRIK**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{bld['emoji']} **{bld['name']}**\n\n"
+        f"📈 Level: **{current_level}** → **{new_level}**\n"
+        f"⚡ Waktu produksi: -{current_reduction}% → **-{new_reduction}%**\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💵 **Biaya Upgrade:** Rp{upgrade_cost:,}\n"
+        f"💰 Saldo kamu: Rp{saldo:,} {cukup}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Yakin mau upgrade?"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Ya, Upgrade", callback_data=f"upgrade_bldok_{payload}"),
+            InlineKeyboardButton("❌ Batal", callback_data=f"factory_{payload}"),
+        ]
+    ])
+    await safe_edit(query, text, keyboard)
+
+
+async def upgrade_building_confirm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Eksekusi upgrade setelah konfirmasi. Format: upgrade_bldok_<building_key>"""
+    query = update.callback_query
+    payload = query.data[len("upgrade_bldok_"):]
     from game.data import BUILDINGS
     if payload not in BUILDINGS:
         await query.answer("❌ Bangunan tidak dikenali", show_alert=True)
