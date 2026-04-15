@@ -59,26 +59,34 @@ def fmt_farm(user: dict, plots: list[dict], page: int = 0) -> str:
     return "\n".join(lines)
 
 
-def fmt_animals(user: dict, pens: list[dict]) -> str:
+def fmt_animals(user: dict, pens: list[dict], page: int = 0) -> str:
     now = datetime.now(timezone.utc)
-    lines = [f"🐾 **Kandang Hewan** ({user['animal_pens']} kandang):", ""]
+    PENS_PER_PAGE = 25
+    total_pages = max(1, (len(pens) + PENS_PER_PAGE - 1) // PENS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PENS_PER_PAGE
+    end = start + PENS_PER_PAGE
+    visible = pens[start:end]
 
-    for pen in pens:
+    page_info = f" (Hal {page+1}/{total_pages})" if total_pages > 1 else ""
+    lines = [f"🐾 **Kandang Hewan** ({user['animal_pens']} kandang){page_info}", ""]
+
+    for pen in visible:
         slot = pen["slot"]
         if pen["status"] == "empty":
-            lines.append(f"  [{slot+1}] 🟩 Kandang kosong — ketuk untuk beli hewan")
+            lines.append(f"[{slot+1}] 🟩 Kosong")
         elif pen["status"] == "producing":
             animal = ANIMALS.get(pen["animal"], {})
             ready_at = datetime.fromisoformat(pen["ready_at"])
             if ready_at.tzinfo is None:
                 ready_at = ready_at.replace(tzinfo=timezone.utc)
             if now >= ready_at:
-                lines.append(f"  [{slot+1}] ✅ {animal.get('emoji','🐾')} {animal.get('name', pen['animal'])} → {animal.get('prod_emoji','📦')} **SIAP AMBIL!**")
+                lines.append(f"[{slot+1}] ✅ {animal.get('emoji','🐾')} {animal.get('name', pen['animal'])} SIAP!")
             else:
                 remaining = int((ready_at - now).total_seconds())
-                lines.append(f"  [{slot+1}] {animal.get('emoji','🐾')} {animal.get('name', pen['animal'])} → ⏳ {fmt_time(remaining)}")
+                lines.append(f"[{slot+1}] {animal.get('emoji','🐾')} {animal.get('name', pen['animal'])} — {fmt_time(remaining)}")
         else:
-            lines.append(f"  [{slot+1}] ❓ {pen['status']}")
+            lines.append(f"[{slot+1}] ❓ {pen['status']}")
     return "\n".join(lines)
 
 
