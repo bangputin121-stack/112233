@@ -9,7 +9,7 @@ from database.db import parse_json_field, get_display_name
 from game.engine import fmt_time
 
 
-def fmt_farm(user: dict, plots: list[dict]) -> str:
+def fmt_farm(user: dict, plots: list[dict], page: int = 0) -> str:
     now = datetime.now(timezone.utc)
     level = user["level"]
     coins = user["coins"]
@@ -18,33 +18,41 @@ def fmt_farm(user: dict, plots: list[dict]) -> str:
     xp_bar = make_xp_bar(xp, next_xp, level)
     name = get_display_name(user)
 
+    PLOTS_PER_PAGE = 25
+    total_pages = max(1, (len(plots) + PLOTS_PER_PAGE - 1) // PLOTS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PLOTS_PER_PAGE
+    end = start + PLOTS_PER_PAGE
+    visible_plots = plots[start:end]
+
+    page_info = f" (Hal {page+1}/{total_pages})" if total_pages > 1 else ""
     lines = [
-        f"🏡 **Kebun {name}**",
-        f"👑 Level {level}  💵 Rp{coins:,}  💎 {user['gems']} permata",
-        f"📈 XP: {xp:,} / {next_xp:,}  {xp_bar}",
+        f"🏡 **Kebun {name}**{page_info}",
+        f"👑 Lv{level}  💵 Rp{coins:,}  💎 {user['gems']}",
+        f"📈 {xp_bar}",
         "",
-        f"🌾 **Lahan Pertanian** ({user['plots']} lahan):",
+        f"🌾 **Lahan** ({user['plots']} total):",
     ]
 
-    for plot in plots:
+    for plot in visible_plots:
         slot = plot["slot"]
         if plot["status"] == "empty":
-            lines.append(f"  [{slot+1}] 🟩 Kosong — ketuk untuk menanam")
+            lines.append(f"[{slot+1}] 🟩 Kosong")
         elif plot["status"] == "infected":
             crop = CROPS.get(plot["crop"], {})
-            lines.append(f"  [{slot+1}] 🐛 {crop.get('emoji','🌱')} {crop.get('name', plot['crop'])} — **KENA HAMA!** Semprot pestisida!")
+            lines.append(f"[{slot+1}] 🐛 {crop.get('emoji','🌱')} {crop.get('name', plot['crop'])} — HAMA!")
         elif plot["status"] == "growing":
             crop = CROPS.get(plot["crop"], {})
             ready_at = datetime.fromisoformat(plot["ready_at"])
             if ready_at.tzinfo is None:
                 ready_at = ready_at.replace(tzinfo=timezone.utc)
             if now >= ready_at:
-                lines.append(f"  [{slot+1}] ✅ {crop.get('emoji','🌱')} {crop.get('name', plot['crop'])} — **SIAP PANEN!**")
+                lines.append(f"[{slot+1}] ✅ {crop.get('emoji','🌱')} {crop.get('name', plot['crop'])} SIAP!")
             else:
                 remaining = int((ready_at - now).total_seconds())
-                lines.append(f"  [{slot+1}] 🌱 {crop.get('emoji','🌱')} {crop.get('name', plot['crop'])} — ⏳ {fmt_time(remaining)}")
+                lines.append(f"[{slot+1}] 🌱 {crop.get('emoji','🌱')} {crop.get('name', plot['crop'])} — {fmt_time(remaining)}")
         else:
-            lines.append(f"  [{slot+1}] ❓ {plot['status']}")
+            lines.append(f"[{slot+1}] ❓ {plot['status']}")
 
     silo = parse_json_field(user["silo_items"])
     lines.append(f"\n📦 Gudang: {sum(silo.values())}/{user['silo_cap']}  🏚 Lumbung: {sum(parse_json_field(user['barn_items']).values())}/{user['barn_cap']}")
