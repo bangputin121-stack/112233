@@ -154,10 +154,18 @@ def plant_keyboard(user_level: int, slot: int):
     buttons.append([InlineKeyboardButton("⬅️ Kembali", callback_data="farm")])
     return InlineKeyboardMarkup(buttons)
 
-def animals_keyboard(pens: list[dict], user_level: int):
+def animals_keyboard(pens: list[dict], user_level: int, page: int = 0):
+    """Keyboard kandang dengan pagination. 25 per halaman."""
+    PENS_PER_PAGE = 25
+    total_pages = max(1, (len(pens) + PENS_PER_PAGE - 1) // PENS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PENS_PER_PAGE
+    end = start + PENS_PER_PAGE
+    visible = pens[start:end]
+
     buttons = []
     row = []
-    for pen in pens:
+    for pen in visible:
         slot = pen["slot"]
         if pen["status"] == "empty":
             label = f"🟩 {slot+1}"
@@ -173,17 +181,26 @@ def animals_keyboard(pens: list[dict], user_level: int):
                 cb = f"pen_collect_{slot}"
             else:
                 label = f"{ANIMALS[pen['animal']]['emoji']} {slot+1}"
-                # Ke detail buat opsi hapus/doping
                 cb = f"pen_detail_{slot}"
         else:
             label = f"❓ {slot+1}"
             cb = f"pen_{slot}"
         row.append(InlineKeyboardButton(label, callback_data=cb))
-        if len(row) == 3:
+        if len(row) == 5:
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
+
+    # Pagination nav
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀️ Hal 1", callback_data=f"pens_page_{page-1}"))
+        nav.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(f"Hal {page+2} ▶️", callback_data=f"pens_page_{page+1}"))
+        buttons.append(nav)
 
     buttons.append([
         InlineKeyboardButton("🧺 Ambil Semua", callback_data="collect_all_animals"),
