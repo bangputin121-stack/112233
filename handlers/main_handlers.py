@@ -566,14 +566,39 @@ async def fertilize_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ─── ANIMALS ──────────────────────────────────────────────────────────────────
 
+def _get_pens_page(ctx) -> int:
+    """Ambil halaman kandang yang lagi aktif dari user_data."""
+    try:
+        return int(ctx.user_data.get("pens_page", 0))
+    except Exception:
+        return 0
+
+
 async def animals_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     pens = await get_animal_pens(user.id)
-    text = fmt_animals(db_user, pens)
-    await safe_edit(query, text, animals_keyboard(pens, db_user["level"]))
+    page = _get_pens_page(ctx)
+    text = fmt_animals(db_user, pens, page)
+    await safe_edit(query, text, animals_keyboard(pens, db_user["level"], page))
+
+
+async def pens_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Pagination kandang: pens_page_<n>"""
+    query = update.callback_query
+    await query.answer()
+    try:
+        page = int(query.data.split("_")[2])
+    except Exception:
+        page = 0
+    ctx.user_data["pens_page"] = page
+    user = query.from_user
+    db_user = await get_user_full(user.id)
+    pens = await get_animal_pens(user.id)
+    text = fmt_animals(db_user, pens, page)
+    await safe_edit(query, text, animals_keyboard(pens, db_user["level"], page))
 
 async def pen_buy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -594,7 +619,7 @@ async def buyanimal_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         pens = await get_animal_pens(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens), animals_keyboard(pens, db_user["level"]))
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -606,7 +631,7 @@ async def pen_collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         pens = await get_animal_pens(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens), animals_keyboard(pens, db_user["level"]))
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -614,7 +639,6 @@ async def pen_collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def pen_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Tampilin detail hewan + opsi doping/hapus."""
     query = update.callback_query
-    await query.answer()
     slot = int(query.data.split("_")[2])
     user = query.from_user
     pens = await get_animal_pens(user.id)
@@ -622,6 +646,7 @@ async def pen_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not pen or pen["status"] != "producing":
         await query.answer("❌ Kandang ini kosong.", show_alert=True)
         return
+    await query.answer()
 
     from game.data import ANIMALS
     animal_key = pen["animal"]
@@ -665,7 +690,7 @@ async def pen_remove_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         pens = await get_animal_pens(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens), animals_keyboard(pens, db_user["level"]))
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -717,7 +742,7 @@ async def expand_pens_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         pens = await get_animal_pens(user.id)
-        await safe_edit(query, fmt_animals(db_user, pens), animals_keyboard(pens, db_user["level"]))
+        await safe_edit(query, fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
 
 async def collect_all_animals_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -733,7 +758,7 @@ async def collect_all_animals_callback(update: Update, ctx: ContextTypes.DEFAULT
             msg += f" ({failed} gagal, gudang mungkin penuh)"
     else:
         msg = "⏳ Belum ada produk hewan yang siap diambil."
-    await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens), animals_keyboard(pens, db_user["level"]))
+    await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
 
 
 # ─── FACTORIES ────────────────────────────────────────────────────────────────
@@ -790,7 +815,6 @@ async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
 async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Show upgrade confirmation with cost breakdown. Format: upgrade_bld_<building_key>"""
     query = update.callback_query
-    await query.answer()
     payload = query.data[len("upgrade_bld_"):]
     from game.data import BUILDINGS
     if payload not in BUILDINGS:
@@ -808,6 +832,8 @@ async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TY
             show_alert=True
         )
         return
+
+    await query.answer()
 
     # Hitung biaya & efek
     base_cost = bld["buy_cost"]
@@ -1904,7 +1930,7 @@ async def items_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logger.error(f"items_callback edit failed: {e}")
-        await query.answer("Gagal load katalog. Coba lagi.", show_alert=True)
+        # Note: query udah di-answer di atas, jangan di-answer lagi
 
 
 async def items_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
