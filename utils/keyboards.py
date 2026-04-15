@@ -68,12 +68,21 @@ def help_slide_keyboard(page: int, total: int):
     buttons.append([InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")])
     return InlineKeyboardMarkup(buttons)
 
-def farm_keyboard(plots: list[dict], user_level: int):
+def farm_keyboard(plots: list[dict], user_level: int, page: int = 0):
+    """Farm keyboard dengan pagination. 25 lahan per halaman, max 2 halaman."""
+    PLOTS_PER_PAGE = 25
+    total_pages = max(1, (len(plots) + PLOTS_PER_PAGE - 1) // PLOTS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * PLOTS_PER_PAGE
+    end = start + PLOTS_PER_PAGE
+    visible_plots = plots[start:end]
+
     buttons = []
     row = []
     has_infected = False
     has_growing = False
-    for i, plot in enumerate(plots):
+    for plot in visible_plots:
         slot = plot["slot"]
         if plot["status"] == "empty":
             label = f"🟩 {slot+1}"
@@ -99,11 +108,21 @@ def farm_keyboard(plots: list[dict], user_level: int):
             cb = f"plot_{slot}"
 
         row.append(InlineKeyboardButton(label, callback_data=cb))
-        if len(row) == 4:
+        if len(row) == 5:  # 5 per row × 5 rows = 25 per page
             buttons.append(row)
             row = []
     if row:
         buttons.append(row)
+
+    # Pagination row kalau ada > 1 halaman
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton("◀️ Halaman 1", callback_data=f"farm_page_{page-1}"))
+        nav.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(f"Halaman {page+2} ▶️", callback_data=f"farm_page_{page+1}"))
+        buttons.append(nav)
 
     action_row = [
         InlineKeyboardButton("🌾 Panen Semua", callback_data="harvest_all"),
