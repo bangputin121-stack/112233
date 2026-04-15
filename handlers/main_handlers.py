@@ -387,14 +387,77 @@ async def farm_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = fmt_farm(db_user, plots, page)
     await safe_edit(query, text, farm_keyboard(plots, db_user["level"], page))
 
-
 async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+
+    # =========================
+    # MODE TANAM MASSAL
+    # =========================
+    if ctx.args and len(ctx.args) >= 2:
+        crop_key = ctx.args[0].lower()
+
+        try:
+            amount = int(ctx.args[1])
+        except:
+            return await safe_send(update, "❌ Jumlah harus angka!\nContoh: /farm jagung 10")
+
+        db_user = await get_or_create_user(user.id, user.username, user.first_name)
+        plots = await get_plots(user.id)
+
+        empty_plots = [p for p in plots if p["status"] == "empty"]
+
+        if not empty_plots:
+            return await safe_send(update, "❌ Tidak ada lahan kosong!")
+
+        # biar tidak over
+        amount = min(amount, len(empty_plots))
+
+        planted = 0
+        failed = 0
+
+        for plot in empty_plots:
+            if planted >= amount:
+                break
+
+            ok, _ = await plant_crop(user.id, plot["slot"], crop_key)
+
+            if ok:
+                planted += 1
+            else:
+                failed += 1
+
+        db_user = await get_user_full(user.id)
+        plots = await get_plots(user.id)
+
+        msg = (
+            f"🌱 Tanam massal: {crop_key}\n"
+            f"Berhasil: {planted}\n"
+            f"Gagal: {failed}"
+        )
+
+        return await safe_send(
+            update,
+            msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)),
+            farm_keyboard(plots, db_user["level"], _get_farm_page(ctx))
+        )
+
+    # =========================
+    # MODE NORMAL (BUKA FARM UI)
+    # =========================
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     plots = await get_plots(user.id)
     page = _get_farm_page(ctx)
     text = fmt_farm(db_user, plots, page)
     await safe_send(update, text, farm_keyboard(plots, db_user["level"], page))
+
+
+#async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+#    user = update.effective_user
+#    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+#    plots = await get_plots(user.id)
+#    page = _get_farm_page(ctx)
+#    text = fmt_farm(db_user, plots, page)
+#    await safe_send(update, text, farm_keyboard(plots, db_user["level"], page))
 
 async def plot_plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
