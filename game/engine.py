@@ -65,6 +65,9 @@ def is_barn_item(item_key: str) -> bool:
 # ─── INVENTORY ───────────────────────────────────────────────────────────────
 
 async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[bool, str]:
+    # Security: tolak qty negatif/zero (anti-exploit)
+    if not isinstance(qty, int) or qty <= 0:
+        return False, "❌ Jumlah tidak valid."
     async with get_db() as db:
         row = await fetchone(db, "SELECT silo_items, barn_items, silo_cap, barn_cap FROM users WHERE user_id = ?", (user_id,))
         silo = parse_json_field(row["silo_items"])
@@ -103,6 +106,9 @@ async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[b
         return True, "ok"
 
 async def remove_from_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[bool, str]:
+    # Security: tolak qty negatif/zero (anti-exploit)
+    if not isinstance(qty, int) or qty <= 0:
+        return False, "❌ Jumlah tidak valid."
     async with get_db() as db:
         row = await fetchone(db, "SELECT silo_items, barn_items FROM users WHERE user_id = ?", (user_id,))
         silo = parse_json_field(row["silo_items"])
@@ -1498,9 +1504,17 @@ async def expand_farm(user_id: int) -> tuple[bool, str]:
     return True, f"✅ Kebun diperluas! +{added} lahan (sekarang {new_plots}/{MAX_PLOTS} total).\n\n⚠️ Lahan baru ada rintangannya!\nBuka 🗺️ **Lahan** di menu utama untuk bersihkan.\nButuh alat? Beli di 🛒 **Toko Alat**."
 
 async def expand_animal_pens(user_id: int) -> tuple[bool, str]:
+    MAX_PENS = 50
     async with get_db() as db:
         user = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (user_id,)))
         barn = parse_json_field(user["barn_items"])
+
+        if user["animal_pens"] >= MAX_PENS:
+            return False, (
+                f"🎖️ KANDANG SUDAH MAKSIMUM!\n\n"
+                f"Lu udah punya {user['animal_pens']}/{MAX_PENS} kandang.\n"
+                f"Tidak bisa perluas lagi."
+            )
 
         required = {"land_deed": 1, "construction_permit": 1}
         missing = []
@@ -1522,7 +1536,8 @@ async def expand_animal_pens(user_id: int) -> tuple[bool, str]:
                 del barn[tool]
 
         current_pens = user["animal_pens"]
-        new_pens = current_pens + 2
+        new_pens = min(current_pens + 2, MAX_PENS)
+        added = new_pens - current_pens
 
         for slot in range(current_pens, new_pens):
             await db.execute("INSERT OR IGNORE INTO animal_pens (user_id, slot, status) VALUES (?, ?, 'empty')", (user_id, slot))
@@ -1530,12 +1545,15 @@ async def expand_animal_pens(user_id: int) -> tuple[bool, str]:
         await db.execute("UPDATE users SET animal_pens=?, barn_items=?, coins=coins-? WHERE user_id=?",
                          (new_pens, dump_json_field(barn), cost, user_id))
         await db.commit()
-        return True, f"✅ +2 kandang hewan! (sekarang {new_pens} total)"
+        return True, f"✅ +{added} kandang hewan! (sekarang {new_pens}/{MAX_PENS} total)"
 
 
 # ─── SELL / DAILY ─────────────────────────────────────────────────────────────
 
 async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
+    # Security: tolak qty negatif/zero (anti-exploit)
+    if not isinstance(qty, int) or qty <= 0:
+        return False, "❌ Jumlah tidak valid."
     price = 0
     if item_key in CROPS:
         price = CROPS[item_key]["sell_price"]
@@ -1626,6 +1644,9 @@ async def claim_daily(user_id: int) -> tuple[bool, str]:
 
 async def buy_tool(user_id: int, tool_key: str, qty: int = 1) -> tuple[bool, str]:
     from game.data import TOOL_SHOP
+    # Security: tolak qty negatif/zero (anti-exploit)
+    if not isinstance(qty, int) or qty <= 0:
+        return False, "❌ Jumlah tidak valid."
     if tool_key not in TOOL_SHOP:
         return False, "❓ Alat tidak ditemukan di toko."
     tool = TOOL_SHOP[tool_key]
