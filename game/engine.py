@@ -1452,9 +1452,18 @@ async def upgrade_barn(user_id: int) -> tuple[bool, str]:
         return True, f"✅ Lumbung diupgrade ke Level {new_lv}! Kapasitas: {new_cap} 📦"
 
 async def expand_farm(user_id: int) -> tuple[bool, str]:
+    MAX_PLOTS = 50
     async with get_db() as db:
         user = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (user_id,)))
         barn = parse_json_field(user["barn_items"])
+
+        # Hard cap max lahan
+        if user["plots"] >= MAX_PLOTS:
+            return False, (
+                f"🎖️ LAHAN SUDAH MAKSIMUM!\n\n"
+                f"Lu udah punya {user['plots']}/{MAX_PLOTS} lahan.\n"
+                f"Tidak bisa perluas lagi."
+            )
 
         # Check expansion tools
         required = {"land_deed": 1, "mallet": 1, "marker_stake": 1}
@@ -1477,7 +1486,8 @@ async def expand_farm(user_id: int) -> tuple[bool, str]:
                 del barn[tool]
 
         current_plots = user["plots"]
-        new_plots = current_plots + PLOTS_PER_EXPANSION
+        new_plots = min(current_plots + PLOTS_PER_EXPANSION, MAX_PLOTS)
+        added = new_plots - current_plots
         new_slots = list(range(current_plots, new_plots))
 
         await db.execute("UPDATE users SET plots=?, barn_items=?, coins=coins-? WHERE user_id=?",
@@ -1485,7 +1495,7 @@ async def expand_farm(user_id: int) -> tuple[bool, str]:
         await db.commit()
 
     await generate_obstacles_for_expansion(user_id, new_slots)
-    return True, f"✅ Kebun diperluas! +{PLOTS_PER_EXPANSION} lahan (sekarang {new_plots} total).\n\n⚠️ Lahan baru ada rintangannya!\nBuka 🗺️ **Lahan** di menu utama untuk bersihkan.\nButuh alat? Beli di 🛒 **Toko Alat**."
+    return True, f"✅ Kebun diperluas! +{added} lahan (sekarang {new_plots}/{MAX_PLOTS} total).\n\n⚠️ Lahan baru ada rintangannya!\nBuka 🗺️ **Lahan** di menu utama untuk bersihkan.\nButuh alat? Beli di 🛒 **Toko Alat**."
 
 async def expand_animal_pens(user_id: int) -> tuple[bool, str]:
     async with get_db() as db:
