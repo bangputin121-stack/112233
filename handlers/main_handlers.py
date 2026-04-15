@@ -353,21 +353,48 @@ async def menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ─── FARM ─────────────────────────────────────────────────────────────────────
 
+def _get_farm_page(ctx) -> int:
+    """Ambil halaman farm yang lagi aktif dari user_data."""
+    try:
+        return int(ctx.user_data.get("farm_page", 0))
+    except Exception:
+        return 0
+
+
 async def farm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     plots = await get_plots(user.id)
-    text = fmt_farm(db_user, plots)
-    await safe_edit(query, text, farm_keyboard(plots, db_user["level"]))
+    page = _get_farm_page(ctx)
+    text = fmt_farm(db_user, plots, page)
+    await safe_edit(query, text, farm_keyboard(plots, db_user["level"], page))
+
+
+async def farm_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handler buat pagination farm: farm_page_<n>"""
+    query = update.callback_query
+    await query.answer()
+    try:
+        page = int(query.data.split("_")[2])
+    except Exception:
+        page = 0
+    ctx.user_data["farm_page"] = page
+    user = query.from_user
+    db_user = await get_user_full(user.id)
+    plots = await get_plots(user.id)
+    text = fmt_farm(db_user, plots, page)
+    await safe_edit(query, text, farm_keyboard(plots, db_user["level"], page))
+
 
 async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     plots = await get_plots(user.id)
-    text = fmt_farm(db_user, plots)
-    await safe_send(update, text, farm_keyboard(plots, db_user["level"]))
+    page = _get_farm_page(ctx)
+    text = fmt_farm(db_user, plots, page)
+    await safe_send(update, text, farm_keyboard(plots, db_user["level"], page))
 
 async def plot_plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -388,12 +415,12 @@ async def plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         plots = await get_plots(user.id)
         db_user = await get_user_full(user.id)
-        full_text = msg + "\n\n" + fmt_farm(db_user, plots)
+        full_text = msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx))
         photo_id = await get_item_photo(crop_key)
         if photo_id:
-            await safe_send_photo(query, full_text, farm_keyboard(plots, db_user["level"]), photo_id)
+            await safe_send_photo(query, full_text, farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)), photo_id)
         else:
-            await safe_edit(query, full_text, farm_keyboard(plots, db_user["level"]))
+            await safe_edit(query, full_text, farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -406,7 +433,7 @@ async def plot_harvest_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         plots = await get_plots(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots), farm_keyboard(plots, db_user["level"]))
+        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -424,7 +451,7 @@ async def harvest_all_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             msg += f" ({failed} gagal, penyimpanan mungkin penuh)"
     else:
         msg = "⏳ Belum ada tanaman yang siap panen."
-    await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots), farm_keyboard(plots, db_user["level"]))
+    await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
 
 async def expand_farm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -434,7 +461,7 @@ async def expand_farm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         plots = await get_plots(user.id)
-        await safe_edit(query, fmt_farm(db_user, plots), farm_keyboard(plots, db_user["level"]))
+        await safe_edit(query, fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
 
 
 # ─── PEST & FERTILIZER ──────────────────────────────────────────────────────
@@ -447,7 +474,7 @@ async def plot_spray_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         plots = await get_plots(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots), farm_keyboard(plots, db_user["level"]))
+        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
@@ -468,7 +495,7 @@ async def spray_all_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg = f"✅ 🧴 Disemprot {sprayed} tanaman!"
     else:
         msg = "❌ Tidak ada tanaman yang kena hama, atau pestisida habis."
-    await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots), farm_keyboard(plots, db_user["level"]))
+    await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
 
 async def fertilize_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -532,7 +559,7 @@ async def fertilize_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ok:
         db_user = await get_user_full(user.id)
         plots = await get_plots(user.id)
-        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots), farm_keyboard(plots, db_user["level"]))
+        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
     else:
         await query.answer(msg, show_alert=True)
 
