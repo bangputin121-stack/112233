@@ -2214,7 +2214,7 @@ async def addorderall_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_message(
                     u["user_id"],
                     f"🎉 **PESANAN EVENT!**\n\n"
-                    f"Admin baru aja nambah pesanan khusus buat semua player!\n\n"
+                    f"Admin baru saja menambahkan pesanan khusus buat semua player!\n\n"
                     f"📦 Items: {items_display}\n"
                     f"💵 Reward: Rp{reward_coins:,}\n"
                     f"⭐ XP: {reward_xp}\n\n"
