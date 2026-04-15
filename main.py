@@ -14,7 +14,7 @@ from telegram.ext import (
 
 from database.db import init_db
 from handlers.main_handlers import (
-    start_handler, menu_callback, farm_callback, farm_cmd,
+    start_handler, menu_callback, farm_callback, farm_cmd, farm_page_callback,
     plot_plant_callback, plant_callback, plot_harvest_callback,
     harvest_all_callback, expand_farm_callback,
     plot_spray_callback, spray_all_callback, fertilize_menu_callback, fertilize_callback,
@@ -190,6 +190,7 @@ def register_handlers(app: Application):
 
     # Farm
     app.add_handler(CallbackQueryHandler(farm_callback, pattern="^farm$"))
+    app.add_handler(CallbackQueryHandler(farm_page_callback, pattern=r"^farm_page_\d+$"))
     app.add_handler(CallbackQueryHandler(plot_plant_callback, pattern=r"^plot_plant_\d+$"))
     app.add_handler(CallbackQueryHandler(plot_harvest_callback, pattern=r"^plot_harvest_\d+$"))
     app.add_handler(CallbackQueryHandler(plant_callback, pattern=r"^plant_\d+_.+$"))
