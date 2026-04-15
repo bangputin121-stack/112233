@@ -20,6 +20,7 @@ from handlers.main_handlers import (
     plot_spray_callback, spray_all_callback, fertilize_menu_callback, fertilize_callback,
     animals_callback, pen_buy_callback, buyanimal_callback,
     pen_collect_callback, expand_pens_callback, collect_all_animals_callback,
+    pens_page_callback,
     pen_detail_callback, pen_remove_callback, pen_dope_callback,
     transfer_cmd,
     factories_callback, buy_building_callback, factory_detail_callback,
@@ -205,6 +206,7 @@ def register_handlers(app: Application):
 
     # Animals
     app.add_handler(CallbackQueryHandler(animals_callback, pattern="^animals$"))
+    app.add_handler(CallbackQueryHandler(pens_page_callback, pattern=r"^pens_page_\d+$"))
     app.add_handler(CallbackQueryHandler(pen_buy_callback, pattern=r"^pen_buy_\d+$"))
     app.add_handler(CallbackQueryHandler(buyanimal_callback, pattern=r"^buyanimal_\d+_.+$"))
     app.add_handler(CallbackQueryHandler(pen_collect_callback, pattern=r"^pen_collect_\d+$"))
