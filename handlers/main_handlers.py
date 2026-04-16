@@ -1280,8 +1280,28 @@ async def rmlist_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     listing_id = int(query.data.split("_")[1])
     user = query.from_user
+
+    # Ambil info listing SEBELUM dihapus (buat update channel)
+    from database.db import get_db, fetchone
+    listing_info = None
+    async with get_db() as db:
+        row = await fetchone(db, "SELECT * FROM market_listings WHERE id = ? AND seller_id = ?", (listing_id, user.id))
+        if row:
+            listing_info = dict(row)
+
     ok, msg = await remove_market_listing(user.id, listing_id)
     await query.answer(msg, show_alert=True)
+
+    # Update pesan di channel pasar jadi "DIBATALKAN"
+    if ok and listing_info and listing_info.get("channel_msg_id"):
+        await update_channel_listing_cancelled(
+            ctx.bot,
+            listing_info["channel_msg_id"],
+            listing_info["item"],
+            listing_info["qty"],
+            listing_info["price"],
+            listing_info.get("seller_name", user.first_name or "Penjual")
+        )
 
 async def market_list_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1482,7 +1502,6 @@ async def update_channel_listing_sold(bot, channel_msg_id: int, buyer_name: str,
             f"🛒 Pembeli: **{buyer_name}**\n\n"
             f"_Listing ini sudah terjual_"
         )
-        # Ganti tombol "Beli Sekarang" jadi tombol status "TERJUAL"
         sold_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ ITEM INI SUDAH TERJUAL", callback_data="listing_sold")]
         ])
@@ -1492,6 +1511,36 @@ async def update_channel_listing_sold(bot, channel_msg_id: int, buyer_name: str,
         )
     except Exception as e:
         logger.error(f"Failed to update channel listing: {e}")
+
+
+async def update_channel_listing_cancelled(bot, channel_msg_id: int, item_key: str, qty: int, price: int, seller_name: str):
+    """Update the channel message to show listing is cancelled by seller."""
+    channel = await get_setting("market_channel")
+    if not channel or not channel_msg_id:
+        return
+    try:
+        from game.data import get_item_emoji, get_item_name
+        emoji = get_item_emoji(item_key)
+        name = get_item_name(item_key)
+        total = price * qty
+
+        text = (
+            f"❌ **LISTING DIBATALKAN**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{emoji} ~~{name}~~ x{qty}\n"
+            f"💵 ~~Rp{price:,}/satuan (Total: Rp{total:,})~~\n\n"
+            f"👤 Penjual: **{seller_name}**\n\n"
+            f"_Listing dibatalkan oleh penjual_"
+        )
+        cancelled_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ LISTING DIBATALKAN", callback_data="listing_sold")]
+        ])
+        await bot.edit_message_text(
+            chat_id=channel, message_id=channel_msg_id,
+            text=text, parse_mode="Markdown", reply_markup=cancelled_keyboard
+        )
+    except Exception as e:
+        logger.error(f"Failed to update channel listing cancelled: {e}")
 
 
 # ─── LAND ─────────────────────────────────────────────────────────────────────
