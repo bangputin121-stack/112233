@@ -291,12 +291,12 @@ def factory_detail_keyboard(building_key: str, slots: list[dict]):
 def storage_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🌾 Gudang (Hasil Panen)", callback_data="storage_silo"),
-            InlineKeyboardButton("🏚 Lumbung (Alat & Olahan)", callback_data="storage_barn"),
+            InlineKeyboardButton("🌾 Lumbung (Hasil Panen)", callback_data="storage_silo"),
+            InlineKeyboardButton("🏚 Gudang (Alat & Olahan)", callback_data="storage_barn"),
         ],
         [
-            InlineKeyboardButton("⬆️ Upgrade Gudang", callback_data="upgrade_silo"),
-            InlineKeyboardButton("⬆️ Upgrade Lumbung", callback_data="upgrade_barn"),
+            InlineKeyboardButton("⬆️ Upgrade Lumbung", callback_data="upgrade_silo"),
+            InlineKeyboardButton("⬆️ Upgrade Gudang", callback_data="upgrade_barn"),
         ],
         [InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")],
     ])
