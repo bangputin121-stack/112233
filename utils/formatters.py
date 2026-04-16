@@ -55,7 +55,7 @@ def fmt_farm(user: dict, plots: list[dict], page: int = 0) -> str:
             lines.append(f"[{slot+1}] ❓ {plot['status']}")
 
     silo = parse_json_field(user["silo_items"])
-    lines.append(f"\n📦 Gudang: {sum(silo.values())}/{user['silo_cap']}  🏚 Lumbung: {sum(parse_json_field(user['barn_items']).values())}/{user['barn_cap']}")
+    lines.append(f"\n📦 Lumbung: {sum(silo.values())}/{user['silo_cap']}  🏚 Gudang: {sum(parse_json_field(user['barn_items']).values())}/{user['barn_cap']}")
     return "\n".join(lines)
 
 
@@ -96,13 +96,13 @@ def fmt_storage(user: dict, storage_type: str = "silo") -> str:
         cap = user["silo_cap"]
         used = sum(items.values())
         level = user["silo_level"]
-        title = f"🌾 **Gudang** (Level {level}) — {used}/{cap}"
+        title = f"🌾 **Lumbung** (Level {level}) — {used}/{cap}"
     else:
         items = parse_json_field(user["barn_items"])
         cap = user["barn_cap"]
         used = sum(items.values())
         level = user["barn_level"]
-        title = f"🏚 **Lumbung** (Level {level}) — {used}/{cap}"
+        title = f"🏚 **Gudang** (Level {level}) — {used}/{cap}"
 
     bar = make_capacity_bar(used, cap)
     lines = [title, bar, ""]
@@ -153,7 +153,7 @@ def fmt_factories(user: dict, buildings: list[dict]) -> str:
 
 
 def fmt_orders(orders: list[dict], silo: dict = None, barn: dict = None) -> str:
-    """Tampilin pesanan + stok player per item (biar nggak perlu bolak-balik ke gudang).
+    """Tampilin pesanan + stok player per item (biar nggak perlu bolak-balik ke lumbung).
     silo & barn adalah dict item player, optional."""
     import json
     lines = [
@@ -258,8 +258,8 @@ def fmt_profile(user: dict) -> str:
         "",
         f"🌱 **Kebun:** {user['plots']} lahan",
         f"🐾 **Kandang:** {user['animal_pens']} kandang",
-        f"📦 **Gudang:** Lv{user['silo_level']} ({silo_used}/{user['silo_cap']})",
-        f"🏚 **Lumbung:** Lv{user['barn_level']} ({barn_used}/{user['barn_cap']})",
+        f"📦 **Lumbung:** Lv{user['silo_level']} ({silo_used}/{user['silo_cap']})",
+        f"🏚 **Gudang:** Lv{user['barn_level']} ({barn_used}/{user['barn_cap']})",
         "",
         f"📅 **Bergabung:** {user['created_at'][:10]}",
         f"━━━━━━━━━━━━━━━━━━━━",
@@ -345,7 +345,7 @@ Tap **Lanjut ▶️** ke halaman 1.""",
 **Atau:** Tap **🌾 Panen Semua** buat panen semua sekaligus.
 
 **Tips:**
-• Hasil panen masuk ke **🌾 Gudang**
+• Hasil panen masuk ke **🌾 Lumbung**
 • Awas hama 🐛 — pake pestisida atau spray
 • Pake pupuk biar lebih cepet tumbuh
 • 🎁 Bonus 5%: dapet alat upgrade gratis tiap panen!
@@ -380,7 +380,7 @@ Tap **Lanjut ▶️** buat hewan ternak.""",
 🦞 Lobster Lv15 → 🦀 Lobster (6 jam)
 
 **Tips:**
-• Hasil produk masuk ke **🌾 Gudang**
+• Hasil produk masuk ke **🌾 Lumbung**
 • Bisa dijual langsung atau diolah di pabrik
 • Beli hewan banyak biar produksi paralel
 • Beda hewan = beda waktu & harga produk
@@ -404,7 +404,7 @@ Tap **Lanjut ▶️** buat pabrik.""",
 2. Beli bangunan (butuh level + duit)
 3. Pilih resep yang mau diproduksi
 4. Tunggu selesai
-5. Ambil → masuk ke **🏚 Lumbung**
+5. Ambil → masuk ke **🏚 Gudang**
 
 **Bangunan tersedia:**
 🥖 Bakery (Lv3) — roti, popcorn
@@ -463,7 +463,7 @@ Tap **Lanjut ▶️** buat pasar.""",
 **Mau beli dari pemain lain:**
 1. Buka **🏪 Pasar** atau cek channel pasar
 2. Tap item yang lu mau
-3. Konfirmasi → barang masuk gudang lu
+3. Konfirmasi → barang masuk lumbung lu
 4. Saldo otomatis ke-transfer ke penjual
 
 **Aturan pasar:**
@@ -487,26 +487,26 @@ Tap **Lanjut ▶️** buat penyimpanan.""",
 
 **Greena Farm punya 2 penyimpanan:**
 
-**🌾 Gudang (Silo)**
+**🌾 Lumbung (Silo)**
 Isi: Hasil panen tanaman + produk hewan
 Contoh: wheat, corn, egg, milk, wool, honey
 
-**🏚 Lumbung (Barn)**
+**🏚 Gudang (Barn)**
 Isi: Barang olahan pabrik + alat upgrade
 Contoh: bread, cheese, pizza, bolt, plank
 
 **Cara upgrade:**
 1. Buka **📦 Penyimpanan**
-2. Tap **⬆️ Upgrade Gudang** atau Lumbung
+2. Tap **⬆️ Upgrade Lumbung** atau Gudang
 3. Butuh: alat upgrade (dari bonus panen / 🛒 Toko Alat) + duit
 
 **Kenapa harus upgrade?**
-• Kapasitas tambah 50 (gudang) atau 25 (lumbung) tiap level
+• Kapasitas tambah 50 (lumbung) atau 25 (gudang) tiap level
 • Kalau penuh, panen bakal nge-block!
 • Penting buat scale-up produksi
 
 **Tips:**
-• Upgrade gudang dulu sebelum lumbung (panen lebih cepet penuh)
+• Upgrade lumbung dulu sebelum gudang (panen lebih cepet penuh)
 • Beli alat di Toko Alat kalau bonus panen kurang
 • Cek tab Penyimpanan rutin biar nggak kelebihan
 
@@ -532,7 +532,7 @@ Roti 7× lebih untung dari wheat. Pizza 10× lebih untung.
 ✅ **Pesanan truk = prioritas #1**
 Income terbesar. Cek tiap login.
 
-✅ **Upgrade gudang/lumbung sebelum penuh**
+✅ **Upgrade lumbung/gudang sebelum penuh**
 Kalau penuh, panen ke-block. Rugi waktu.
 
 ✅ **Pantau channel pasar**
@@ -548,7 +548,7 @@ Tanya-tanya, trading, ikut event!
 Bot punya fitur visual. Tanya admin.
 
 ✅ **Jangan boros di awal**
-Save duit buat upgrade gudang & beli pabrik.
+Save duit buat upgrade lumbung & beli pabrik.
 
 ━━━━━━━━━━━━━━━━━━━━
 Tap **Lanjut ▶️** buat command list.""",
@@ -652,7 +652,7 @@ Sambil nunggu, ambil hadiah harian:
 **Step 3: Panen!** ✅
 ➡️ Balik ke **🏠 Kebun Saya**
 ➡️ Tap **🌾 Panen Semua**
-➡️ Hasil masuk Gudang otomatis
+➡️ Hasil masuk Lumbung otomatis
 
 **Step 4: Cek Pesanan Truk** 🚚
 ➡️ Buka **🚚 Pesanan**
@@ -723,7 +723,7 @@ Mau dapet harga lebih mahal dari NPC? Jual ke pemain lain!
 **Cara beli:**
 ➡️ Cek channel pasar atau buka **🏪 Pasar** di bot
 ➡️ Tap item yang kamu mau → konfirmasi
-➡️ Barang langsung masuk gudang
+➡️ Barang langsung masuk lumbung
 
 ⚠️ Maks 5 listing aktif per orang. Hapus yang lama dulu kalo penuh.
 
@@ -731,7 +731,7 @@ Mau dapet harga lebih mahal dari NPC? Jual ke pemain lain!
 📦 **KALO GUDANG PENUH**
 ━━━━━━━━━━━━━━━━━━━━
 ➡️ Buka **📦 Penyimpanan**
-➡️ Tap **⬆️ Upgrade Gudang/Lumbung**
+➡️ Tap **⬆️ Upgrade Lumbung/Gudang**
 ➡️ Butuh alat? Cek bonus panen atau beli di **🛒 Toko Alat**
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -778,7 +778,7 @@ def fmt_items_crops() -> str:
         "━━━━━━━━━━━━━━━━━━━━",
         "",
         "Tanam di lahan, tunggu tumbuh, lalu panen!",
-        "Hasil panen masuk ke Gudang & bisa dijual.",
+        "Hasil panen masuk ke Lumbung & bisa dijual.",
         "",
     ]
     for k, v in CROPS.items():
@@ -842,10 +842,10 @@ def fmt_items_tools() -> str:
         "",
         "Alat didapat dari: bonus panen (5%) atau beli di 🛒 Toko Alat",
         "",
-        "**📌 Alat Upgrade Gudang:**",
+        "**📌 Alat Upgrade Lumbung:**",
         "Butuh 3x📌Nail + 2x🔧Screw + 1x🪟Wood Panel + Rp800",
         "",
-        "**🔩 Alat Upgrade Lumbung:**",
+        "**🔩 Alat Upgrade Gudang:**",
         "Butuh 3x🔩Bolt + 2x🪵Plank + 1x🩹Duct Tape + Rp1,000",
         "",
         "**📜 Alat Perluasan Lahan:**",
