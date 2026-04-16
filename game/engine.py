@@ -82,8 +82,8 @@ async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[b
                     f"📦 GUDANG PENUH!\n\n"
                     f"Kapasitas: {used}/{silo_cap}\n"
                     f"Mau masukin: {qty} item\n\n"
-                    f"💡 Jual hasil panen di Gudang\n"
-                    f"   atau Upgrade Gudang dulu!"
+                    f"💡 Jual hasil panen di Lumbung\n"
+                    f"   atau Upgrade Lumbung dulu!"
                 )
             silo[item_key] = silo.get(item_key, 0) + qty
             await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
@@ -95,7 +95,7 @@ async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[b
                     f"Kapasitas: {used}/{barn_cap}\n"
                     f"Mau masukin: {qty} item\n\n"
                     f"💡 Jual produk olahan dulu\n"
-                    f"   atau Upgrade Lumbung!"
+                    f"   atau Upgrade Gudang!"
                 )
             barn[item_key] = barn.get(item_key, 0) + qty
             await db.execute("UPDATE users SET barn_items = ? WHERE user_id = ?", (dump_json_field(barn), user_id))
@@ -125,7 +125,7 @@ async def remove_from_inventory(user_id: int, item_key: str, qty: int = 1) -> tu
         elif is_barn_item(item_key):
             have = barn.get(item_key, 0)
             if have < qty:
-                return False, f"Kurang {get_item_name(item_key)} di lumbung (punya {have}, butuh {qty})"
+                return False, f"Kurang {get_item_name(item_key)} di gudang (punya {have}, butuh {qty})"
             barn[item_key] = have - qty
             if barn[item_key] == 0:
                 del barn[item_key]
@@ -195,7 +195,7 @@ async def plant_crop(user_id: int, slot: int, crop_key: str) -> tuple[bool, str]
                 f"Butuh: Rp{seed_cost:,}\n"
                 f"Punya: Rp{user['coins']:,}\n"
                 f"Kurang: Rp{kurang:,}\n\n"
-                f"💡 Jual hasil panen di Gudang dulu!"
+                f"💡 Jual hasil panen di Lumbung dulu!"
             )
 
         now = utcnow()
@@ -841,21 +841,20 @@ async def get_all_building_levels(user_id: int) -> dict:
 
 
 async def upgrade_building(user_id: int, building_key: str) -> tuple[bool, str]:
-    """Upgrade level pabrik. Tiap level nambah -15% waktu cooldown. Max level 10.
-    Biaya upgrade = base_cost × (current_level × 1.5)
+    """Upgrade level pabrik. Max level 7.
+    CD reduction: Lv1=0%, Lv2=10%, Lv3=20%, Lv4=30%, Lv5=40%, Lv6=50%, Lv7=60%
     """
     if building_key not in BUILDINGS:
         return False, "❌ Bangunan tidak dikenal."
     bld = BUILDINGS[building_key]
 
     current_level = await get_building_level(user_id, building_key)
-    MAX_LEVEL = 10
+    MAX_LEVEL = 7
 
     if current_level >= MAX_LEVEL:
         return False, f"🎖️ {bld['name']} udah level maksimum ({MAX_LEVEL})."
 
     async with get_db() as db:
-        # Cek player punya building ini
         owned = await fetchone(
             db,
             "SELECT COUNT(*) as cnt FROM buildings WHERE user_id = ? AND building = ?",
@@ -864,7 +863,6 @@ async def upgrade_building(user_id: int, building_key: str) -> tuple[bool, str]:
         if not owned or owned["cnt"] == 0:
             return False, f"❌ Kamu belum punya {bld['name']}. Beli dulu!"
 
-        # Hitung biaya upgrade
         base_cost = bld["buy_cost"]
         upgrade_cost = int(base_cost * current_level * 1.5)
 
@@ -878,7 +876,6 @@ async def upgrade_building(user_id: int, building_key: str) -> tuple[bool, str]:
                 f"Kurang: Rp{kurang:,}"
             )
 
-        # Upgrade
         new_level = current_level + 1
         await db.execute(
             "INSERT OR REPLACE INTO building_levels (user_id, building, level) VALUES (?, ?, ?)",
@@ -890,8 +887,7 @@ async def upgrade_building(user_id: int, building_key: str) -> tuple[bool, str]:
         )
         await db.commit()
 
-    # Hitung reduksi cooldown total
-    reduction_percent = min(new_level - 1, MAX_LEVEL - 1) * 15
+    reduction_percent = (new_level - 1) * 10
     return True, (
         f"✅ {bld['emoji']} {bld['name']} di-upgrade!\n\n"
         f"📈 Level: {current_level} → **{new_level}**\n"
@@ -902,12 +898,11 @@ async def upgrade_building(user_id: int, building_key: str) -> tuple[bool, str]:
 
 def _apply_cooldown_reduction(base_time: int, level: int) -> int:
     """Kurangin waktu cooldown berdasarkan level pabrik.
-    Level 1 = 0% (normal), Level 2 = -15%, Level 3 = -30%, dst.
-    Max reduction 85% (level 10 = -135% dicap jadi -85%)."""
+    Lv1=0%, Lv2=-10%, Lv3=-20%, Lv4=-30%, Lv5=-40%, Lv6=-50%, Lv7=-60%"""
     if level <= 1:
         return base_time
-    reduction = (level - 1) * 0.15
-    reduction = min(reduction, 0.85)  # max reduksi 85%
+    reduction = (level - 1) * 0.10  # 10% per level
+    reduction = min(reduction, 0.60)  # max 60% di level 7
     return int(base_time * (1 - reduction))
 
 
@@ -1396,9 +1391,19 @@ async def clear_obstacle(user_id: int, slot: int) -> tuple[bool, str]:
 # ─── UPGRADES ────────────────────────────────────────────────────────────────
 
 async def upgrade_silo(user_id: int) -> tuple[bool, str]:
+    """Upgrade Lumbung (silo = hasil panen). Max kapasitas 700."""
+    MAX_SILO_CAP = 700
     async with get_db() as db:
         user = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (user_id,)))
         barn = parse_json_field(user["barn_items"])
+
+        if user["silo_cap"] >= MAX_SILO_CAP:
+            return False, (
+                f"🎖️ LUMBUNG SUDAH MAKSIMUM!\n\n"
+                f"Kapasitas: {user['silo_cap']}/{MAX_SILO_CAP}\n"
+                f"Tidak bisa upgrade lagi."
+            )
+
         cost = SILO_UPGRADE["cost_per_upgrade"]
         tools = SILO_UPGRADE["tools_needed"]
 
@@ -1419,17 +1424,27 @@ async def upgrade_silo(user_id: int) -> tuple[bool, str]:
             if barn[tool] <= 0:
                 del barn[tool]
 
-        new_cap = user["silo_cap"] + SILO_UPGRADE["upgrade_amount"]
+        new_cap = min(user["silo_cap"] + SILO_UPGRADE["upgrade_amount"], MAX_SILO_CAP)
         new_lv = user["silo_level"] + 1
         await db.execute("UPDATE users SET silo_cap=?, silo_level=?, barn_items=?, coins=coins-? WHERE user_id=?",
                          (new_cap, new_lv, dump_json_field(barn), cost, user_id))
         await db.commit()
-        return True, f"✅ Gudang diupgrade ke Level {new_lv}! Kapasitas: {new_cap} 📦"
+        return True, f"✅ Lumbung diupgrade ke Level {new_lv}! Kapasitas: {new_cap}/{MAX_SILO_CAP} 📦"
 
 async def upgrade_barn(user_id: int) -> tuple[bool, str]:
+    """Upgrade Gudang (barn = alat & olahan). Max kapasitas 500."""
+    MAX_BARN_CAP = 500
     async with get_db() as db:
         user = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (user_id,)))
         barn = parse_json_field(user["barn_items"])
+
+        if user["barn_cap"] >= MAX_BARN_CAP:
+            return False, (
+                f"🎖️ GUDANG SUDAH MAKSIMUM!\n\n"
+                f"Kapasitas: {user['barn_cap']}/{MAX_BARN_CAP}\n"
+                f"Tidak bisa upgrade lagi."
+            )
+
         cost = BARN_UPGRADE["cost_per_upgrade"]
         tools = BARN_UPGRADE["tools_needed"]
 
@@ -1450,12 +1465,12 @@ async def upgrade_barn(user_id: int) -> tuple[bool, str]:
             if barn[tool] <= 0:
                 del barn[tool]
 
-        new_cap = user["barn_cap"] + BARN_UPGRADE["upgrade_amount"]
+        new_cap = min(user["barn_cap"] + BARN_UPGRADE["upgrade_amount"], MAX_BARN_CAP)
         new_lv = user["barn_level"] + 1
         await db.execute("UPDATE users SET barn_cap=?, barn_level=?, barn_items=?, coins=coins-? WHERE user_id=?",
                          (new_cap, new_lv, dump_json_field(barn), cost, user_id))
         await db.commit()
-        return True, f"✅ Lumbung diupgrade ke Level {new_lv}! Kapasitas: {new_cap} 📦"
+        return True, f"✅ Gudang diupgrade ke Level {new_lv}! Kapasitas: {new_cap}/{MAX_BARN_CAP} 📦"
 
 async def expand_farm(user_id: int) -> tuple[bool, str]:
     MAX_PLOTS = 50
