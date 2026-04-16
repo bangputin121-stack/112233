@@ -755,7 +755,7 @@ async def collect_all_animals_callback(update: Update, ctx: ContextTypes.DEFAULT
     if collected > 0:
         msg = f"✅ Diambil {collected} produk hewan!"
         if failed:
-            msg += f" ({failed} gagal, gudang mungkin penuh)"
+            msg += f" ({failed} gagal, lumbung mungkin penuh)"
     else:
         msg = "⏳ Belum ada produk hewan yang siap diambil."
     await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
@@ -797,7 +797,7 @@ async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     from game.engine import get_building_level
     bld = BUILDINGS.get(building_key, {})
     bld_level = await get_building_level(user.id, building_key)
-    reduction = (bld_level - 1) * 15
+    reduction = (bld_level - 1) * 10
     level_info = ""
     if bld_level > 1:
         level_info = f"\n📈 Level: **{bld_level}** (-{reduction}% waktu produksi)"
@@ -824,7 +824,7 @@ async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TY
     from game.engine import get_building_level
     bld = BUILDINGS[payload]
     current_level = await get_building_level(user.id, payload)
-    MAX_LEVEL = 10
+    MAX_LEVEL = 7
 
     if current_level >= MAX_LEVEL:
         await query.answer(
@@ -839,8 +839,8 @@ async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TY
     base_cost = bld["buy_cost"]
     upgrade_cost = int(base_cost * current_level * 1.5)
     new_level = current_level + 1
-    current_reduction = (current_level - 1) * 15
-    new_reduction = (new_level - 1) * 15
+    current_reduction = (current_level - 1) * 10
+    new_reduction = (new_level - 1) * 10
 
     db_user = await get_user_full(user.id)
     saldo = db_user["coins"]
@@ -886,7 +886,7 @@ async def upgrade_building_confirm_callback(update: Update, ctx: ContextTypes.DE
         slots = [b for b in buildings if b["building"] == payload]
         bld = BUILDINGS[payload]
         bld_level = await get_building_level(user.id, payload)
-        reduction = (bld_level - 1) * 15
+        reduction = (bld_level - 1) * 10
         text = (
             f"{bld.get('emoji','🏭')} **{bld.get('name','Factory')}**\n"
             f"📈 Level: **{bld_level}** (-{reduction}% waktu produksi)\n\n"
@@ -960,8 +960,8 @@ async def storage_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     barn = parse_json_field(db_user["barn_items"])
     text = (
         f"📦 **Ringkasan Penyimpanan**\n\n"
-        f"🌾 Gudang (Lv{db_user['silo_level']}): {sum(silo.values())}/{db_user['silo_cap']}\n"
-        f"🏚 Lumbung (Lv{db_user['barn_level']}): {sum(barn.values())}/{db_user['barn_cap']}\n\n"
+        f"🌾 Lumbung (Lv{db_user['silo_level']}): {sum(silo.values())}/{db_user['silo_cap']}\n"
+        f"🏚 Gudang (Lv{db_user['barn_level']}): {sum(barn.values())}/{db_user['barn_cap']}\n\n"
         f"Pilih penyimpanan untuk lihat item:"
     )
     await safe_edit(query, text, storage_keyboard())
@@ -1056,8 +1056,8 @@ async def sell_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         barn = parse_json_field(db_user["barn_items"])
         text = (
             f"📦 **Ringkasan Penyimpanan**\n\n"
-            f"🌾 Gudang (Lv{db_user['silo_level']}): {sum(silo.values())}/{db_user['silo_cap']}\n"
-            f"🏚 Lumbung (Lv{db_user['barn_level']}): {sum(barn.values())}/{db_user['barn_cap']}\n\n"
+            f"🌾 Lumbung (Lv{db_user['silo_level']}): {sum(silo.values())}/{db_user['silo_cap']}\n"
+            f"🏚 Gudang (Lv{db_user['barn_level']}): {sum(barn.values())}/{db_user['barn_cap']}\n\n"
             f"Pilih penyimpanan untuk lihat item:"
         )
         await safe_edit(query, text, storage_keyboard())
@@ -1072,7 +1072,7 @@ async def upgrade_silo_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         silo = parse_json_field(db_user["silo_items"])
         barn = parse_json_field(db_user["barn_items"])
         await safe_edit(query,
-            f"📦 **Penyimpanan**\n🌾 Gudang: {sum(silo.values())}/{db_user['silo_cap']}\n🏚 Lumbung: {sum(barn.values())}/{db_user['barn_cap']}",
+            f"📦 **Penyimpanan**\n🌾 Lumbung: {sum(silo.values())}/{db_user['silo_cap']}\n🏚 Gudang: {sum(barn.values())}/{db_user['barn_cap']}",
             storage_keyboard()
         )
 
@@ -1086,7 +1086,7 @@ async def upgrade_barn_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         silo = parse_json_field(db_user["silo_items"])
         barn = parse_json_field(db_user["barn_items"])
         await safe_edit(query,
-            f"📦 **Penyimpanan**\n🌾 Gudang: {sum(silo.values())}/{db_user['silo_cap']}\n🏚 Lumbung: {sum(barn.values())}/{db_user['barn_cap']}",
+            f"📦 **Penyimpanan**\n🌾 Lumbung: {sum(silo.values())}/{db_user['silo_cap']}\n🏚 Gudang: {sum(barn.values())}/{db_user['barn_cap']}",
             storage_keyboard()
         )
 
@@ -1802,7 +1802,7 @@ async def transfer_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "• Maks 5 transfer/hari (reset jam 07:00 WIB)\n"
             "• Tidak bisa kirim ke diri sendiri\n"
             "• Receiver harus terdaftar di bot\n"
-            "• Item bakal dipotong dari Gudang/Lumbung kamu\n"
+            "• Item bakal dipotong dari Lumbung/Gudang kamu\n"
             "• Cek user_id lewat /profile (yang mau ditransfer harus kasih ID-nya)"
         ), back_to_menu())
         return
