@@ -414,27 +414,37 @@ async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         planted = 0
         failed = 0
+        
+        success_slots = []
+        failed_slots = []
 
         for plot in empty_plots:
             if planted >= amount:
                 break
 
-            ok, _ = await plant_crop(user.id, plot["slot"], crop_key)
+            ok, err = await plant_crop(user.id, plot["slot"], crop_key)
 
             if ok:
                 planted += 1
+                success_slots.append(plot["slot"])
             else:
                 failed += 1
+                failed_slots.append(plot["slot"])
+                print(f"[FARM ERROR] Slot {plot['slot']}: {err}")
 
         db_user = await get_user_full(user.id)
         plots = await get_plots(user.id)
 
+        # Format slot biar rapi
+        success_text = ", ".join(map(str, success_slots)) if success_slots else "-"
+        failed_text = ", ".join(map(str, failed_slots)) if failed_slots else "-"
+        
         msg = (
             f"🌱 Tanam massal: {crop_key}\n"
             f"Berhasil: {planted}\n"
             f"Gagal: {failed}"
         )
-
+            
         return await safe_send(
             update,
             msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)),
