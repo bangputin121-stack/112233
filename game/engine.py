@@ -5,6 +5,7 @@ import random
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from datetime import datetime, timezone, timedelta
 
 import aiosqlite
 
@@ -337,8 +338,6 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
 ##        now = utcnow()
 ##        regrow_time = int(crop["grow_time"] * 0.5)
 ##        new_ready = now + timedelta(seconds=regrow_time)
-
-        from datetime import datetime, timezone
 
         now = utcnow()
 
