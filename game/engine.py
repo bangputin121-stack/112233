@@ -79,11 +79,11 @@ async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[b
             used = sum(silo.values())
             if used + qty > silo_cap:
                 return False, (
-                    f"📦 GUDANG PENUH!\n\n"
+                    f"🌾 LUMBUNG PENUH!\n\n"
                     f"Kapasitas: {used}/{silo_cap}\n"
                     f"Mau masukin: {qty} item\n\n"
-                    f"💡 Jual hasil panen di Lumbung\n"
-                    f"   atau Upgrade Lumbung dulu!"
+                    f"💡 Jual hasil panen dulu\n"
+                    f"   atau Upgrade Lumbung!"
                 )
             silo[item_key] = silo.get(item_key, 0) + qty
             await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
@@ -91,7 +91,7 @@ async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[b
             used = sum(barn.values())
             if used + qty > barn_cap:
                 return False, (
-                    f"🏚 LUMBUNG PENUH!\n\n"
+                    f"🏚 GUDANG PENUH!\n\n"
                     f"Kapasitas: {used}/{barn_cap}\n"
                     f"Mau masukin: {qty} item\n\n"
                     f"💡 Jual produk olahan dulu\n"
@@ -242,8 +242,20 @@ async def harvest_crop(user_id: int, slot: int) -> tuple[bool, str]:
         bonus_drop = ""
         bonus_rate = float(await get_setting("bonus_drop_rate", BONUS_DROP_RATE))
         if random.random() < bonus_rate:
-            all_tools = list(UPGRADE_TOOLS.keys()) + list(CLEARING_TOOLS.keys()) + list(EXPANSION_TOOLS.keys())
-            bonus_item = random.choice(all_tools)
+            # Cuma item yang BENERAN BERGUNA di game (16 item)
+            useful_tools = [
+                # Upgrade Lumbung (silo)
+                "nail", "screw", "wood_panel",
+                # Upgrade Gudang (barn)
+                "bolt", "plank", "duct_tape",
+                # Perluas lahan
+                "land_deed", "mallet", "marker_stake",
+                # Perluas kandang
+                "construction_permit",
+                # Bersihin rintangan
+                "axe", "saw", "dynamite", "tnt_barrel", "shovel", "rusty_hoe",
+            ]
+            bonus_item = random.choice(useful_tools)
             ok2, _ = await add_to_inventory(user_id, bonus_item, 1)
             if ok2:
                 b_emoji = get_item_emoji(bonus_item)
@@ -321,39 +333,17 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
         # Use pesticide
         await remove_from_inventory(user_id, "pesticide", 1)
 
-#        # Regrow at 50% of original time
-#        now = utcnow()
-#        regrow_time = int(crop["grow_time"] * 0.5)
-#        new_ready = now + timedelta(seconds=regrow_time)
-
-        from datetime import datetime, timezone
-
+        # Regrow at 50% of original time
         now = utcnow()
+        regrow_time = int(crop["grow_time"] * 0.5)
+        new_ready = now + timedelta(seconds=regrow_time)
 
-        # ambil ready_at lama dari plot
-        ready_at = datetime.fromisoformat(plot["ready_at"])
-        if ready_at.tzinfo is None:
-            ready_at = ready_at.replace(tzinfo=timezone.utc)
-
-        # hitung sisa waktu
-        remaining = (ready_at - now).total_seconds()
-
-        # kalau sudah lewat (edge case)
-        if remaining < 0:
-            remaining = 0
-
-        remaining = remaining * 1.06   # penalty 10%
-        max_time = crop["grow_time"]
-        remaining = min(remaining, max_time)
-        new_ready = now + timedelta(seconds=remaining)
-        
         await db.execute(
             "UPDATE plots SET status='growing', planted_at=?, ready_at=? WHERE user_id=? AND slot=?",
             (now.isoformat(), new_ready.isoformat(), user_id, slot))
         await db.commit()
-    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(remaining)}."
 
-#    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
+    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
 
 
 async def use_fertilizer(user_id: int, slot: int, fert_type: str) -> tuple[bool, str]:
