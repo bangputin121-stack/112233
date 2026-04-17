@@ -333,17 +333,26 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
         # Use pesticide
         await remove_from_inventory(user_id, "pesticide", 1)
 
-        # Regrow at 50% of original time
+        from datetime import datetime, timezone
+                from datetime import datetime, timezone
         now = utcnow()
-        regrow_time = int(crop["grow_time"] * 0.5)
-        new_ready = now + timedelta(seconds=regrow_time)
+        ready_at = datetime.fromisoformat(plot["ready_at"])
+        if ready_at.tzinfo is None:
+            ready_at = ready_at.replace(tzinfo=timezone.utc)
+        remaining = (ready_at - now).total_seconds()
+        if remaining < 0:
+            remaining = 0
+        remaining = remaining * 1.06  
+        max_time = crop["grow_time"]
+        remaining = min(remaining, max_time)
+        new_ready = now + timedelta(seconds=remaining)
 
         await db.execute(
             "UPDATE plots SET status='growing', planted_at=?, ready_at=? WHERE user_id=? AND slot=?",
             (now.isoformat(), new_ready.isoformat(), user_id, slot))
         await db.commit()
 
-    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
+    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(remaining)}."
 
 
 async def use_fertilizer(user_id: int, slot: int, fert_type: str) -> tuple[bool, str]:
