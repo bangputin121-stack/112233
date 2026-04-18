@@ -310,6 +310,8 @@ async def check_pest_on_plant(user_id: int, total_plots: int):
                     "UPDATE plots SET status = 'infected' WHERE user_id = ? AND slot = ?",
                     (user_id, target["slot"]))
                 await db.commit()
+
+
 async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
     """Spray pesticide on infected plot. Cures pest, plant regrows at 50% original time."""
     have = await get_item_count(user_id, "pesticide")
@@ -364,6 +366,9 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
         await db.commit()
 
     return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(remaining)}."
+
+##    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
+
 
 async def use_fertilizer(user_id: int, slot: int, fert_type: str) -> tuple[bool, str]:
     """Use fertilizer on a growing plot to speed it up."""
@@ -755,82 +760,6 @@ async def admin_add_building_slot(target_user_id: int, building_key: str) -> tup
         f"👤 User: `{target_user_id}`\n"
         f"{bld['emoji']} {bld['name']}\n"
         f"📦 Slot: {current_slots} → **{new_total}** (max {MAX_SLOTS})"
-    )
-
-async def upgrade_building_slot(user_id: int, building_key: str) -> tuple[bool, str]:
-    if building_key not in BUILDINGS:
-        return False, "❓ Bangunan tidak dikenal."
-    
-    bld = BUILDINGS[building_key]
-    MAX_SLOTS = 6
-
-    async with get_db() as db:
-        # ambil data user
-        user_row = await fetchone(db, 
-            "SELECT * FROM users WHERE user_id = ?", (user_id,)
-        )
-        if not user_row:
-            return False, "❌ User tidak ditemukan."
-        
-        user = dict(user_row)
-
-        # ambil slot yang sudah dimiliki
-        existing = await fetchall(
-            db,
-            "SELECT slot FROM buildings WHERE user_id = ? AND building = ? ORDER BY slot",
-            (user_id, building_key)
-        )
-
-        if not existing:
-            return False, f"❌ Kamu belum punya {bld['name']}."
-        # 🔒 Cegah double upgrade (race condition)
-        if len(existing) >= MAX_SLOTS:
-            return False, f"🎖️ Slot sudah maksimum ({MAX_SLOTS})."
-        
-        current_slots = len(existing)
-        next_slot = current_slots + 1
-
-        # 🚫 batas maksimum
-        if next_slot > MAX_SLOTS:
-            return False, f"🎖️ Slot sudah maksimum ({MAX_SLOTS})."
-
-        # 💰 ambil biaya upgrade dari config
-        slot_costs = bld.get("slot_upgrade_costs", {})
-        cost = slot_costs.get(next_slot)
-
-        if cost is None:
-            return False, "❌ Upgrade tidak tersedia untuk slot ini."
-
-        if user["coins"] < cost:
-            return False, f"💵 Uang tidak cukup!\nButuh Rp{cost:,} untuk slot {next_slot}"
-
-        # cari slot number kosong
-        used_slots = {e["slot"] for e in existing}
-        new_slot = 0
-        while new_slot in used_slots:
-            new_slot += 1
-        # 🔒 Safety tambahan
-        if new_slot >= MAX_SLOTS:
-            return False, "❌ Slot tidak valid."
-        # insert slot baru
-        await db.execute("""
-            INSERT INTO buildings (user_id, building, slot, status)
-            VALUES (?, ?, ?, 'idle')
-        """, (user_id, building_key, new_slot))
-
-        # potong uang user
-        await db.execute(
-            "UPDATE users SET coins = coins - ? WHERE user_id = ?",
-            (cost, user_id)
-        )
-
-        await db.commit()
-
-    return True, (
-        f"🏗️ Upgrade berhasil!\n\n"
-        f"{bld['emoji']} {bld['name']}\n"
-        f"📦 Slot: {current_slots} → **{next_slot}**\n"
-        f"💸 Biaya: Rp{cost:,}"
     )
 
 
