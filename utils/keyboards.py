@@ -285,7 +285,7 @@ def factory_detail_keyboard(building_key: str, slots: list[dict]):
             buttons.append([InlineKeyboardButton(label, callback_data=f"collect_{building_key}_{s['slot']}")])
 
     buttons.append([InlineKeyboardButton("⬆️ Upgrade Pabrik (-10% waktu)", callback_data=f"upgrade_bld_{building_key}")])
-    buttons.append([InlineKeyboardButton("📦 Upgrade Slot", callback_data=f"upgrade_slot_{building_key}")
+    buttons.append([InlineKeyboardButton("📦 Upgrade Slot", callback_data=f"upgrade_slot_{building_key}")])
     buttons.append([InlineKeyboardButton("⬅️ Kembali", callback_data="factories")])
     return InlineKeyboardMarkup(buttons)
 
