@@ -45,7 +45,7 @@ from handlers.main_handlers import (
     help_callback, help_cmd, help_page_callback,
     noop_callback, locked_callback,
     gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
-    redeem_prompt_callback, redeem_cmd, upgrade_slot_callback, 
+    redeem_prompt_callback, redeem_cmd,
     mytitles_cmd, mytitles_callback, title_equip_callback, title_unequip_callback,
 )
 from handlers.admin_handlers import (
@@ -221,7 +221,6 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(buy_building_callback, pattern=r"^buy_building_.+$"))
     app.add_handler(CallbackQueryHandler(upgrade_building_confirm_callback, pattern=r"^upgrade_bldok_.+$"))
     app.add_handler(CallbackQueryHandler(upgrade_building_callback, pattern=r"^upgrade_bld_.+$"))
-    app.add_handler(CallbackQueryHandler(upgrade_slot_callback, pattern=r"^upgrade_slot_.+$"))
     app.add_handler(CallbackQueryHandler(factory_detail_callback, pattern=r"^factory_.+$"))
     app.add_handler(CallbackQueryHandler(produce_callback, pattern=r"^produce_.+$"))
     app.add_handler(CallbackQueryHandler(collect_callback, pattern=r"^collect_.+$"))
