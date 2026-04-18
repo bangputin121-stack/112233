@@ -221,6 +221,7 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(buy_building_callback, pattern=r"^buy_building_.+$"))
     app.add_handler(CallbackQueryHandler(upgrade_building_confirm_callback, pattern=r"^upgrade_bldok_.+$"))
     app.add_handler(CallbackQueryHandler(upgrade_building_callback, pattern=r"^upgrade_bld_.+$"))
+    app.add_handler(CallbackQueryHandler(upgrade_slot_callback, pattern=r"^upgrade_slot_.+$"))
     app.add_handler(CallbackQueryHandler(factory_detail_callback, pattern=r"^factory_.+$"))
     app.add_handler(CallbackQueryHandler(produce_callback, pattern=r"^produce_.+$"))
     app.add_handler(CallbackQueryHandler(collect_callback, pattern=r"^collect_.+$"))
