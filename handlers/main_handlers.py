@@ -967,6 +967,27 @@ async def upgrade_building_confirm_callback(update: Update, ctx: ContextTypes.DE
         )
         await safe_edit(query, text, factory_detail_keyboard(payload, slots))
 
+async def upgrade_slot_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    building_key = query.data.replace("upgrade_slot_", "")
+    user = query.from_user
+
+    ok, msg = await upgrade_building_slot(user.id, building_key)
+
+    if ok:
+        buildings = await get_user_buildings(user.id)
+        slots = [b for b in buildings if b["building"] == building_key]
+
+        from game.data import BUILDINGS
+        bld = BUILDINGS[building_key]
+
+        text = f"{bld['emoji']} **{bld['name']}**\n\n{msg}"
+        await safe_edit(query, text, factory_detail_keyboard(building_key, slots))
+    else:
+        await query.answer(msg, show_alert=True)
+
 
 async def produce_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
