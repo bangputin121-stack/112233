@@ -45,7 +45,7 @@ from handlers.main_handlers import (
     help_callback, help_cmd, help_page_callback,
     noop_callback, locked_callback,
     gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
-    redeem_prompt_callback, redeem_cmd,
+    redeem_prompt_callback, redeem_cmd, upgrade_slot_callback, 
     mytitles_cmd, mytitles_callback, title_equip_callback, title_unequip_callback,
 )
 from handlers.admin_handlers import (
