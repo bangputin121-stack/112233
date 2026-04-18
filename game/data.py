@@ -31,6 +31,12 @@ BUILDINGS = {
     "bakery": {
         "name": "Bakery", "emoji": "🏭", "slots": 2,
         "buy_cost": 80000, "level_req": 3,
+        "slot_upgrade_costs": {
+            3: 280_000,
+            4: 320_000,
+            5: 360_000,
+            6: 400_000
+    },
         "recipes": {
             "bread":      {"inputs": {"wheat": 3}, "time": 300, "xp": 5, "sell_price": 3500},
             "popcorn":    {"inputs": {"corn": 2},  "time": 600, "xp": 8, "sell_price": 5500},
@@ -39,6 +45,12 @@ BUILDINGS = {
     "feed_mill": {
         "name": "Feed Mill", "emoji": "⚙️", "slots": 2,
         "buy_cost": 60000, "level_req": 2,
+        "slot_upgrade_costs": {
+            3: 280_000,
+            4: 320_000,
+            5: 360_000,
+            6: 400_000
+    },
         "recipes": {
             "chicken_feed": {"inputs": {"wheat": 2, "corn": 1}, "time": 180, "xp": 3, "sell_price": 2000},
             "cow_feed":     {"inputs": {"corn": 3, "soybean": 1}, "time": 360, "xp": 5, "sell_price": 3500},
@@ -47,6 +59,12 @@ BUILDINGS = {
     "dairy": {
         "name": "Dairy", "emoji": "🧈", "slots": 2,
         "buy_cost": 120000, "level_req": 6,
+        "slot_upgrade_costs": {
+            3: 280_000,
+            4: 320_000,
+            5: 360_000,
+            6: 400_000
+    },
         "recipes": {
             "butter":      {"inputs": {"milk": 2},                    "time": 900,  "xp": 12, "sell_price": 9000},
             "cheese":      {"inputs": {"milk": 3, "goat_milk": 1},    "time": 1800, "xp": 20, "sell_price": 16000},
@@ -56,6 +74,12 @@ BUILDINGS = {
     "textile_mill": {
         "name": "Textile Mill", "emoji": "🧵", "slots": 2,
         "buy_cost": 180000, "level_req": 11,
+        "slot_upgrade_costs": {
+            3: 280_000,
+            4: 320_000,
+            5: 360_000,
+            6: 400_000
+    },
         "recipes": {
             "cotton_fabric": {"inputs": {"cotton": 2},              "time": 1800, "xp": 20, "sell_price": 18000},
             "wool_sweater":  {"inputs": {"wool": 3},                "time": 3600, "xp": 30, "sell_price": 28000},
@@ -64,6 +88,11 @@ BUILDINGS = {
     "kitchen": {
         "name": "Kitchen", "emoji": "👨‍🍳", "slots": 3,
         "buy_cost": 250000, "level_req": 14,
+        "slot_upgrade_costs": {
+            4: 320_000,
+            5: 360_000,
+            6: 400_000
+    },
         "recipes": {
             "pumpkin_pie":          {"inputs": {"pumpkin": 2, "butter": 1, "sugar": 2},            "time": 3600,  "xp": 35, "sell_price": 38000},
             "pizza":                {"inputs": {"bread": 1, "tomato": 2, "cheese": 1},             "time": 5400,  "xp": 50, "sell_price": 55000},
