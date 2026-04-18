@@ -354,6 +354,9 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
             remaining = 0
 
         remaining = remaining * 1.1   # penalty 10%
+        max_remaining = crop["grow_time"]
+        if remaining > max_remaining:
+            remaining = max_remaining
 
         new_ready = now + timedelta(seconds=remaining)
 
