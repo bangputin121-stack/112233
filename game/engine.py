@@ -312,12 +312,6 @@ async def check_pest_on_plant(user_id: int, total_plots: int):
                 await db.commit()
 
 
-async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
-    """Spray pesticide on infected plot. Cures pest, plant regrows at 50% original time."""
-    have = await get_item_count(user_id, "pesticide")
-    if have < 1:
-        return False, "❌ Kamu tidak punya 🧴 Pestisida!\nBeli di 🛒 **Toko Alat** (Rp10,000)."
-
     async with get_db() as db:
         plot = await fetchone(db,
             "SELECT * FROM plots WHERE user_id = ? AND slot = ?", (user_id, slot))
@@ -333,6 +327,12 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
 
         # Use pesticide
         await remove_from_inventory(user_id, "pesticide", 1)
+
+##        # Regrow at 50% of original time
+##        now = utcnow()
+##        regrow_time = int(crop["grow_time"] * 0.5)
+##        new_ready = now + timedelta(seconds=regrow_time)
+
         now = utcnow()
 
         # ambil ready_at lama dari plot
@@ -340,10 +340,6 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
         if ready_at.tzinfo is None:
             ready_at = ready_at.replace(tzinfo=timezone.utc)
 
-        if now >= ready_at:
-            return False, "❌ Tanaman sudah siap panen dan tidak bisa terkena hama."
-        if plot.get("status") != "growing":
-            return False, "❌ Tanaman tidak dalam fase tumbuh."
         # hitung sisa waktu
         remaining = (ready_at - now).total_seconds()
 
@@ -364,9 +360,6 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
         await db.commit()
 
     return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(remaining)}."
-
-##    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
-
 
 async def use_fertilizer(user_id: int, slot: int, fert_type: str) -> tuple[bool, str]:
     """Use fertilizer on a growing plot to speed it up."""
