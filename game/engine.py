@@ -5,7 +5,6 @@ import random
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from datetime import datetime, timezone, timedelta
 
 import aiosqlite
 
@@ -334,40 +333,17 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
         # Use pesticide
         await remove_from_inventory(user_id, "pesticide", 1)
 
-##        # Regrow at 50% of original time
-##        now = utcnow()
-##        regrow_time = int(crop["grow_time"] * 0.5)
-##        new_ready = now + timedelta(seconds=regrow_time)
-
+        # Regrow at 50% of original time
         now = utcnow()
-
-        # ambil ready_at lama dari plot
-        ready_at = datetime.fromisoformat(plot["ready_at"])
-        if ready_at.tzinfo is None:
-            ready_at = ready_at.replace(tzinfo=timezone.utc)
-
-        # hitung sisa waktu
-        remaining = (ready_at - now).total_seconds()
-
-        # kalau sudah lewat (edge case)
-        if remaining < 0:
-            remaining = 0
-
-        remaining = remaining * 1.1   # penalty 10%
-        max_remaining = crop["grow_time"]
-        if remaining > max_remaining:
-            remaining = max_remaining
-
-        new_ready = now + timedelta(seconds=remaining)
+        regrow_time = int(crop["grow_time"] * 0.5)
+        new_ready = now + timedelta(seconds=regrow_time)
 
         await db.execute(
             "UPDATE plots SET status='growing', planted_at=?, ready_at=? WHERE user_id=? AND slot=?",
             (now.isoformat(), new_ready.isoformat(), user_id, slot))
         await db.commit()
 
-    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(remaining)}."
-
-##    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
+    return True, f"✅ 🧴 Pestisida disemprot! {crop['emoji']} {crop['name']} tumbuh lagi dalam {fmt_time(regrow_time)}."
 
 
 async def use_fertilizer(user_id: int, slot: int, fert_type: str) -> tuple[bool, str]:
