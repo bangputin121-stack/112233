@@ -264,7 +264,8 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
 
 # ─── START / MENU ─────────────────────────────────────────────────────────────
 
-async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+#async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     maintenance = await get_setting("maintenance_mode", "0")
     
