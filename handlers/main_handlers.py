@@ -264,8 +264,7 @@ async def safe_send_photo(target, text: str, keyboard=None, photo_id=None):
 
 # ─── START / MENU ─────────────────────────────────────────────────────────────
 
-#async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     maintenance = await get_setting("maintenance_mode", "0")
     
@@ -388,87 +387,14 @@ async def farm_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = fmt_farm(db_user, plots, page)
     await safe_edit(query, text, farm_keyboard(plots, db_user["level"], page))
 
+
 async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-
-    # =========================
-    # MODE TANAM MASSAL
-    # =========================
-    if ctx.args and len(ctx.args) >= 2:
-        crop_key = ctx.args[0].lower()
-
-        try:
-            amount = int(ctx.args[1])
-        except:
-            return await safe_send(update, "❌ Jumlah harus angka!\nContoh: /farm jagung 10")
-
-        db_user = await get_or_create_user(user.id, user.username, user.first_name)
-        plots = await get_plots(user.id)
-
-        empty_plots = [p for p in plots if p["status"] == "empty"]
-
-        if not empty_plots:
-            return await safe_send(update, "❌ Tidak ada lahan kosong!")
-
-        # biar tidak over
-        amount = min(amount, len(empty_plots))
-
-        planted = 0
-        failed = 0
-        
-        success_slots = []
-        failed_slots = []
-
-        for plot in empty_plots:
-            if planted >= amount:
-                break
-
-            ok, err = await plant_crop(user.id, plot["slot"], crop_key)
-
-            if ok:
-                planted += 1
-                success_slots.append(plot["slot"])
-            else:
-                failed += 1
-                failed_slots.append(plot["slot"])
-                print(f"[FARM ERROR] Slot {plot['slot']}: {err}")
-
-        db_user = await get_user_full(user.id)
-        plots = await get_plots(user.id)
-
-        # Format slot biar rapi
-        success_text = ", ".join(map(str, success_slots)) if success_slots else "-"
-        failed_text = ", ".join(map(str, failed_slots)) if failed_slots else "-"
-        
-        msg = (
-            f"🌱 Tanam massal: {crop_key}\n"
-            f"Berhasil: {planted}\n"
-            f"Gagal: {failed}"
-        )
-            
-        return await safe_send(
-            update,
-            msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)),
-            farm_keyboard(plots, db_user["level"], _get_farm_page(ctx))
-        )
-
-    # =========================
-    # MODE NORMAL (BUKA FARM UI)
-    # =========================
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     plots = await get_plots(user.id)
     page = _get_farm_page(ctx)
     text = fmt_farm(db_user, plots, page)
     await safe_send(update, text, farm_keyboard(plots, db_user["level"], page))
-
-
-#async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-#    user = update.effective_user
-#    db_user = await get_or_create_user(user.id, user.username, user.first_name)
-#    plots = await get_plots(user.id)
-#    page = _get_farm_page(ctx)
-#    text = fmt_farm(db_user, plots, page)
-#    await safe_send(update, text, farm_keyboard(plots, db_user["level"], page))
 
 async def plot_plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1903,6 +1829,58 @@ async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     from utils.formatters import help_total_pages
     from utils.keyboards import help_slide_keyboard
     await safe_send(update, fmt_help(0), help_slide_keyboard(0, help_total_pages()))
+
+
+# ─── SET LANGUAGE ────────────────────────────────────────────────────────────
+
+async def setlang_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Command /setlang — pilih bahasa."""
+    from utils.lang import t, get_lang_name
+    from database.db import get_user_lang
+    lang = await get_user_lang(update.effective_user.id)
+    text = t("lang_current", lang, language=get_lang_name(lang))
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇮🇩 Bahasa Indonesia", callback_data="setlang_id"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+        ],
+        [InlineKeyboardButton("🏠 Menu", callback_data="menu")],
+    ])
+    await safe_send(update, text, keyboard)
+
+
+async def setlang_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Callback setlang_id / setlang_en / setlang_menu."""
+    query = update.callback_query
+    data = query.data
+
+    # Menu prompt
+    if data == "setlang_menu":
+        await query.answer()
+        from utils.lang import t, get_lang_name
+        from database.db import get_user_lang
+        lang = await get_user_lang(query.from_user.id)
+        text = t("lang_current", lang, language=get_lang_name(lang))
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🇮🇩 Bahasa Indonesia", callback_data="setlang_id"),
+                InlineKeyboardButton("🇬🇧 English", callback_data="setlang_en"),
+            ],
+            [InlineKeyboardButton("🏠 Menu", callback_data="menu")],
+        ])
+        await safe_edit(query, text, keyboard)
+        return
+
+    # Set language
+    lang_code = data.split("_")[1]  # "id" or "en"
+    user = query.from_user
+    from utils.lang import t, get_lang_name
+    from database.db import set_user_lang
+    await set_user_lang(user.id, lang_code)
+    msg = t("lang_changed", lang_code, language=get_lang_name(lang_code))
+    await query.answer(msg, show_alert=True)
+    # Refresh menu in new language
+    await safe_edit(query, msg, main_menu_keyboard())
 
 
 async def transfer_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
