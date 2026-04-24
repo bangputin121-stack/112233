@@ -125,7 +125,7 @@ def farm_keyboard(plots: list[dict], user_level: int, page: int = 0):
         buttons.append(nav)
 
     action_row = [
-        InlineKeyboardButton("🌾 Panen Semua", callback_data="harvest_all"),
+        #InlineKeyboardButton("🌾 Panen Semua", callback_data="harvest_all"),
     ]
     if has_growing:
         action_row.append(InlineKeyboardButton("🧪 Pupuk", callback_data="fertilize_menu"))
