@@ -52,7 +52,7 @@ from handlers.admin_handlers import (
     admin_cmd, adm_panel_callback, adm_stats_callback,
     adm_settings_callback, adm_toggle_setting,
     adm_users_callback, adm_user_detail_callback,
-    adm_setcoins_callback, adm_setlevel_callback, adm_setgems_callback,
+    adm_setcoins_callback, adm_setlevel_callback, adm_setgems_callback, adm_setxp_callback,
     adm_giveitem_callback, adm_give2_callback, adm_resetuser_callback,
     adm_broadcast_callback, adm_logs_callback,
     adm_broadcast_confirm_callback, adm_broadcast_cancel_callback,
@@ -292,6 +292,7 @@ def register_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(adm_user_detail_callback, pattern=r"^adm_user_\d+$"))
     app.add_handler(CallbackQueryHandler(adm_setcoins_callback, pattern=r"^adm_setcoins_\d+$"))
     app.add_handler(CallbackQueryHandler(adm_setlevel_callback, pattern=r"^adm_setlevel_\d+$"))
+    app.add_handler(CallbackQueryHandler(adm_setxp_callback, pattern=r"^adm_setxp_"))
     app.add_handler(CallbackQueryHandler(adm_setgems_callback, pattern=r"^adm_setgems_\d+$"))
     app.add_handler(CallbackQueryHandler(adm_giveitem_callback, pattern=r"^adm_giveitem_\d+$"))
     app.add_handler(CallbackQueryHandler(adm_give2_callback, pattern=r"^adm_give2_\d+_.+$"))
