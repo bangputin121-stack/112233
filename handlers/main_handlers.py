@@ -390,11 +390,548 @@ async def farm_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def farm_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+
+    # =========================
+    # MODE TANAM MASSAL
+    # =========================
+    if ctx.args and len(ctx.args) >= 2:
+        crop_key = ctx.args[0].lower()
+
+        try:
+            amount = int(ctx.args[1])
+        except:
+            return await safe_send(update, "❌ Jumlah harus angka!\nContoh: /farm jagung 10")
+
+        db_user = await get_or_create_user(user.id, user.username, user.first_name)
+        plots = await get_plots(user.id)
+
+        empty_plots = [p for p in plots if p["status"] == "empty"]
+
+        if not empty_plots:
+            return await safe_send(update, "❌ Tidak ada lahan kosong!")
+
+        # biar tidak over
+        amount = min(amount, len(empty_plots))
+
+        planted = 0
+        failed = 0
+        
+        success_slots = []
+        failed_slots = []
+
+        for plot in empty_plots:
+            if planted >= amount:
+                break
+
+            ok, err = await plant_crop(user.id, plot["slot"], crop_key)
+
+            if ok:
+                planted += 1
+                success_slots.append(plot["slot"])
+            else:
+                failed += 1
+                failed_slots.append(plot["slot"])
+                print(f"[FARM ERROR] Slot {plot['slot']}: {err}")
+
+        db_user = await get_user_full(user.id)
+        plots = await get_plots(user.id)
+
+        # Format slot biar rapi
+        success_text = ", ".join(map(str, success_slots)) if success_slots else "-"
+        failed_text = ", ".join(map(str, failed_slots)) if failed_slots else "-"
+        
+        msg = (
+            f"🌱 Tanam massal: {crop_key}\n"
+            f"Berhasil: {planted}\n"
+            f"Gagal: {failed}"
+        )
+            
+        return await safe_send(
+            update,
+            msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)),
+            farm_keyboard(plots, db_user["level"], _get_farm_page(ctx))
+        )
+
+    # =========================
+    # MODE NORMAL (BUKA FARM UI)
+    # =========================
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     plots = await get_plots(user.id)
     page = _get_farm_page(ctx)
     text = fmt_farm(db_user, plots, page)
     await safe_send(update, text, farm_keyboard(plots, db_user["level"], page))
+
+async def plot_plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+    await safe_edit(query, f"🌱 **Pilih tanaman untuk Lahan {slot+1}:**\n\n(Harga yang ditampilkan adalah biaya benih)", plant_keyboard(db_user["level"], slot))
+
+async def plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    parts = query.data.split("_")
+    slot = int(parts[1])
+    crop_key = "_".join(parts[2:])
+    user = query.from_user
+    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+    ok, msg = await plant_crop(user.id, slot, crop_key)
+    if ok:
+        plots = await get_plots(user.id)
+        db_user = await get_user_full(user.id)
+        full_text = msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx))
+        photo_id = await get_item_photo(crop_key)
+        if photo_id:
+            await safe_send_photo(query, full_text, farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)), photo_id)
+        else:
+            await safe_edit(query, full_text, farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+async def plot_harvest_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    ok, msg = await harvest_crop(user.id, slot)
+    if ok:
+        db_user = await get_user_full(user.id)
+        plots = await get_plots(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+async def harvest_all_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    count, failed, _ = await harvest_all(user.id)
+    db_user = await get_user_full(user.id)
+    plots = await get_plots(user.id)
+    if count > 0:
+        msg = f"✅ Dipanen {count} tanaman!"
+        if failed:
+            msg += f" ({failed} gagal, penyimpanan mungkin penuh)"
+    else:
+        msg = "⏳ Belum ada tanaman yang siap panen."
+    await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+
+async def expand_farm_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = query.from_user
+    ok, msg = await expand_farm(user.id)
+    await query.answer(msg, show_alert=True)
+    if ok:
+        db_user = await get_user_full(user.id)
+        plots = await get_plots(user.id)
+        await safe_edit(query, fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+
+
+# ─── PEST & FERTILIZER ──────────────────────────────────────────────────────
+
+async def plot_spray_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    ok, msg = await spray_pesticide(user.id, slot)
+    if ok:
+        db_user = await get_user_full(user.id)
+        plots = await get_plots(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+async def spray_all_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    plots = await get_plots(user.id)
+    sprayed = 0
+    for p in plots:
+        if p["status"] == "infected":
+            ok, _ = await spray_pesticide(user.id, p["slot"])
+            if ok:
+                sprayed += 1
+    db_user = await get_user_full(user.id)
+    plots = await get_plots(user.id)
+    if sprayed > 0:
+        msg = f"✅ 🧴 Disemprot {sprayed} tanaman!"
+    else:
+        msg = "❌ Tidak ada tanaman yang kena hama, atau pestisida habis."
+    await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+
+async def fertilize_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = query.from_user
+    from game.engine import get_item_count
+    fert_count = await get_item_count(user.id, "fertilizer")
+    super_count = await get_item_count(user.id, "super_fertilizer")
+
+    plots = await get_plots(user.id)
+    growing = [p for p in plots if p["status"] == "growing"]
+
+    if not growing:
+        await query.answer("❌ Tidak ada tanaman yang sedang tumbuh.", show_alert=True)
+        return
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    buttons = []
+    for p in growing:
+        from datetime import datetime, timezone
+        ready_at = datetime.fromisoformat(p["ready_at"])
+        if ready_at.tzinfo is None:
+            ready_at = ready_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if now >= ready_at:
+            continue  # already ready
+        from game.data import CROPS
+        crop = CROPS.get(p["crop"], {})
+        from game.engine import fmt_time
+        remaining = int((ready_at - now).total_seconds())
+        buttons.append([
+            InlineKeyboardButton(
+                f"🧪 {crop.get('emoji','🌱')} Lahan {p['slot']+1} ({fmt_time(remaining)})",
+                callback_data=f"fert_{p['slot']}_fertilizer"
+            ),
+            InlineKeyboardButton(
+                f"⚗️ Super",
+                callback_data=f"fert_{p['slot']}_super_fertilizer"
+            ),
+        ])
+
+    if not buttons:
+        await query.answer("✅ Semua tanaman sudah siap panen!", show_alert=True)
+        return
+
+    text = (
+        f"🧪 **Pilih Tanaman untuk Dipupuk**\n\n"
+        f"🧪 Pupuk Biasa (30% cepat): {fert_count} punya\n"
+        f"⚗️ Pupuk Super (50% cepat): {super_count} punya\n\n"
+        f"Ketuk tanaman di bawah:"
+    )
+    buttons.append([InlineKeyboardButton("⬅️ Kembali", callback_data="farm")])
+    await safe_edit(query, text, InlineKeyboardMarkup(buttons))
+
+async def fertilize_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    parts = query.data.split("_")
+    slot = int(parts[1])
+    fert_type = "_".join(parts[2:])
+    user = query.from_user
+    ok, msg = await use_fertilizer(user.id, slot, fert_type)
+    if ok:
+        db_user = await get_user_full(user.id)
+        plots = await get_plots(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_farm(db_user, plots, _get_farm_page(ctx)), farm_keyboard(plots, db_user["level"], _get_farm_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+
+# ─── ANIMALS ──────────────────────────────────────────────────────────────────
+
+def _get_pens_page(ctx) -> int:
+    """Ambil halaman kandang yang lagi aktif dari user_data."""
+    try:
+        return int(ctx.user_data.get("pens_page", 0))
+    except Exception:
+        return 0
+
+
+async def animals_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+    pens = await get_animal_pens(user.id)
+    page = _get_pens_page(ctx)
+    text = fmt_animals(db_user, pens, page)
+    await safe_edit(query, text, animals_keyboard(pens, db_user["level"], page))
+
+
+async def pens_page_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Pagination kandang: pens_page_<n>"""
+    query = update.callback_query
+    await query.answer()
+    try:
+        page = int(query.data.split("_")[2])
+    except Exception:
+        page = 0
+    ctx.user_data["pens_page"] = page
+    user = query.from_user
+    db_user = await get_user_full(user.id)
+    pens = await get_animal_pens(user.id)
+    text = fmt_animals(db_user, pens, page)
+    await safe_edit(query, text, animals_keyboard(pens, db_user["level"], page))
+
+async def pen_buy_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+    await safe_edit(query, f"🐾 **Pilih hewan untuk Kandang {slot+1}:**", buy_animal_keyboard(db_user["level"], slot))
+
+async def buyanimal_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    parts = query.data.split("_")
+    slot = int(parts[1])
+    animal_key = "_".join(parts[2:])
+    user = query.from_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    ok, msg = await buy_animal(user.id, slot, animal_key)
+    if ok:
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+async def pen_collect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    ok, msg = await collect_animal(user.id, slot)
+    if ok:
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+
+async def pen_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Tampilin detail hewan + opsi doping/hapus."""
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    pens = await get_animal_pens(user.id)
+    pen = next((p for p in pens if p["slot"] == slot), None)
+    if not pen or pen["status"] != "producing":
+        await query.answer("❌ Kandang ini kosong.", show_alert=True)
+        return
+    await query.answer()
+
+    from game.data import ANIMALS
+    animal_key = pen["animal"]
+    animal = ANIMALS.get(animal_key, {})
+
+    # Hitung sisa waktu
+    from datetime import datetime, timezone
+    ready_at = datetime.fromisoformat(pen["ready_at"])
+    if ready_at.tzinfo is None:
+        ready_at = ready_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    remaining = max(0, int((ready_at - now).total_seconds()))
+
+    db_user = await get_user_full(user.id)
+    barn = parse_json_field(db_user["barn_items"])
+    has_doping = barn.get("animal_doping", 0) > 0
+
+    from game.engine import fmt_time
+    text = (
+        f"🐾 **Detail Kandang {slot+1}**\n\n"
+        f"{animal.get('emoji', '🐾')} **{animal.get('name', 'Hewan')}**\n"
+        f"⏰ Sisa waktu: {fmt_time(remaining) if remaining > 0 else '✅ SIAP PANEN'}\n"
+        f"📦 Produk: {animal.get('prod_emoji', '')} {animal.get('product', '?').replace('_', ' ').title()}\n"
+        f"💵 Harga jual produk: Rp{animal.get('sell_price', 0):,}\n\n"
+        f"💊 Doping kamu: {barn.get('animal_doping', 0)}\n\n"
+        f"**Aksi yang tersedia:**\n"
+        f"• 💊 Doping → kurangin waktu 30%\n"
+        f"• 🗑️ Hapus → refund 50% harga beli"
+    )
+    from utils.keyboards import pen_detail_keyboard
+    await safe_edit(query, text, pen_detail_keyboard(slot, animal_key, has_doping))
+
+
+async def pen_remove_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Hapus hewan dari kandang dengan refund 50%."""
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    from game.engine import remove_animal
+    ok, msg = await remove_animal(user.id, slot)
+    if ok:
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
+    else:
+        await query.answer(msg, show_alert=True)
+
+
+async def pen_dope_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Pake doping ke hewan."""
+    query = update.callback_query
+    slot = int(query.data.split("_")[2])
+    user = query.from_user
+    from game.engine import apply_animal_doping
+    ok, msg = await apply_animal_doping(user.id, slot)
+    if ok:
+        # Refresh detail page biar player liat efek doping
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        pen = next((p for p in pens if p["slot"] == slot), None)
+        if pen and pen["status"] == "producing":
+            from game.data import ANIMALS
+            from datetime import datetime, timezone
+            from game.engine import fmt_time
+            from utils.keyboards import pen_detail_keyboard
+            animal = ANIMALS.get(pen["animal"], {})
+            ready_at = datetime.fromisoformat(pen["ready_at"])
+            if ready_at.tzinfo is None:
+                ready_at = ready_at.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            remaining = max(0, int((ready_at - now).total_seconds()))
+            barn = parse_json_field(db_user["barn_items"])
+            has_doping = barn.get("animal_doping", 0) > 0
+            text = (
+                f"🐾 **Detail Kandang {slot+1}**\n\n"
+                f"{msg}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"{animal.get('emoji', '🐾')} **{animal.get('name', 'Hewan')}**\n"
+                f"⏰ Sisa waktu: {fmt_time(remaining) if remaining > 0 else '✅ SIAP PANEN'}\n"
+                f"💊 Doping kamu: {barn.get('animal_doping', 0)}"
+            )
+            await safe_edit(query, text, pen_detail_keyboard(slot, pen["animal"], has_doping))
+        else:
+            await query.answer(msg, show_alert=True)
+    else:
+        await query.answer(msg, show_alert=True)
+
+async def expand_pens_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = query.from_user
+    ok, msg = await expand_animal_pens(user.id)
+    await query.answer(msg, show_alert=True)
+    if ok:
+        db_user = await get_user_full(user.id)
+        pens = await get_animal_pens(user.id)
+        await safe_edit(query, fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
+
+async def collect_all_animals_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    await get_or_create_user(user.id, user.username, user.first_name)
+    collected, failed, _ = await collect_all_animals(user.id)
+    db_user = await get_user_full(user.id)
+    pens = await get_animal_pens(user.id)
+    if collected > 0:
+        msg = f"✅ Diambil {collected} produk hewan!"
+        if failed:
+            msg += f" ({failed} gagal, lumbung mungkin penuh)"
+    else:
+        msg = "⏳ Belum ada produk hewan yang siap diambil."
+    await safe_edit(query, msg + "\n\n" + fmt_animals(db_user, pens, _get_pens_page(ctx)), animals_keyboard(pens, db_user["level"], _get_pens_page(ctx)))
+
+
+# ─── FACTORIES ────────────────────────────────────────────────────────────────
+
+async def factories_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+    buildings = await get_user_buildings(user.id)
+    text = fmt_factories(db_user, buildings)
+    await safe_edit(query, text, factories_keyboard(buildings, db_user["level"]))
+
+async def buy_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    building_key = "_".join(query.data.split("_")[2:])
+    user = query.from_user
+    ok, msg = await buy_building(user.id, building_key)
+    if ok:
+        db_user = await get_user_full(user.id)
+        buildings = await get_user_buildings(user.id)
+        await safe_edit(query, msg + "\n\n" + fmt_factories(db_user, buildings), factories_keyboard(buildings, db_user["level"]))
+    else:
+        await query.answer(msg, show_alert=True)
+
+async def factory_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    building_key = "_".join(query.data.split("_")[1:])
+    user = query.from_user
+    db_user = await get_or_create_user(user.id, user.username, user.first_name)
+    buildings = await get_user_buildings(user.id)
+    slots = [b for b in buildings if b["building"] == building_key]
+
+    from game.data import BUILDINGS
+    from game.engine import get_building_level
+    bld = BUILDINGS.get(building_key, {})
+    bld_level = await get_building_level(user.id, building_key)
+    reduction = (bld_level - 1) * 10
+    level_info = ""
+    if bld_level > 1:
+        level_info = f"\n📈 Level: **{bld_level}** (-{reduction}% waktu produksi)"
+    else:
+        level_info = "\n📈 Level: **1** (belum di-upgrade)"
+
+    text = (
+        f"{bld.get('emoji','🏭')} **{bld.get('name','Factory')}**"
+        f"{level_info}\n\n"
+        f"Pilih resep untuk diproduksi:"
+    )
+    await safe_edit(query, text, factory_detail_keyboard(building_key, slots))
+
+
+async def upgrade_building_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show upgrade confirmation with cost breakdown. Format: upgrade_bld_<building_key>"""
+    query = update.callback_query
+    payload = query.data[len("upgrade_bld_"):]
+    from game.data import BUILDINGS
+    if payload not in BUILDINGS:
+        await query.answer("❌ Bangunan tidak dikenali", show_alert=True)
+        return
+    user = query.from_user
+    from game.engine import get_building_level
+    bld = BUILDINGS[payload]
+    current_level = await get_building_level(user.id, payload)
+    MAX_LEVEL = 7
+
+    if current_level >= MAX_LEVEL:
+        await query.answer(
+            f"🎖️ {bld['name']} udah level maksimum ({MAX_LEVEL}).",
+            show_alert=True
+        )
+        return
+
+    await query.answer()
+
+    # Hitung biaya & efek
+    base_cost = bld["buy_cost"]
+    upgrade_cost = int(base_cost * current_level * 1.5)
+    new_level = current_level + 1
+    current_reduction = (current_level - 1) * 10
+    new_reduction = (new_level - 1) * 10
+
+    db_user = await get_user_full(user.id)
+    saldo = db_user["coins"]
+    cukup = "✅" if saldo >= upgrade_cost else "❌"
+
+    text = (
+        f"⬆️ **KONFIRMASI UPGRADE PABRIK**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{bld['emoji']} **{bld['name']}**\n\n"
+        f"📈 Level: **{current_level}** → **{new_level}**\n"
+        f"⚡ Waktu produksi: -{current_reduction}% → **-{new_reduction}%**\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💵 **Biaya Upgrade:** Rp{upgrade_cost:,}\n"
+        f"💰 Saldo kamu: Rp{saldo:,} {cukup}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Yakin mau upgrade?"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Ya, Upgrade", callback_data=f"upgrade_bldok_{payload}"),
+            InlineKeyboardButton("❌ Batal", callback_data=f"factory_{payload}"),
+        ]
+    ])
+    await safe_edit(query, text, keyboard)
+
 
 async def plot_plant_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
