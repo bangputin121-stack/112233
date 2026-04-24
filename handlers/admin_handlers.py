@@ -285,7 +285,17 @@ async def adm_text_input(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"❌ Error: {e}")
         ctx.user_data.pop("adm_action", None)
-
+    elif action == "set_xp":
+        try:
+            xp = int(text)
+            target_id = int(ctx.user_data.get("adm_target_id"))
+            await update_user(target_id, xp=xp)
+            await log_admin_action(update.effective_user.id, "set_xp", target_id, str(xp))
+            await update.message.reply_text(
+                f"✅ Set XP {xp} untuk user {target_id}")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+        ctx.user_data.pop("adm_action", None)
     elif action == "set_gems":
         try:
             gems = int(text)
@@ -434,7 +444,9 @@ async def adm_user_detail_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton("🗑️ Reset Pengguna", callback_data=f"adm_resetuser_{target_id}"),
             InlineKeyboardButton("🚫 Ban/Unban", callback_data="noop"),
         ],
-        [InlineKeyboardButton("⬅️ Kembali", callback_data="adm_users")],
+        [InlineKeyboardButton("⬅️ Kembali", callback_data="adm_users"),
+         InlineKeyboardButton("⚡ Set XP", callback_data=f"adm_setxp_{target_id}")
+        ],
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.MARKDOWN)
 
@@ -446,6 +458,15 @@ async def adm_setcoins_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["adm_action"] = "set_coins"
     ctx.user_data["adm_target_id"] = target_id
     await query.edit_message_text(f"💵 Kirim jumlah Rp baru untuk user {target_id}:")
+
+@admin_only
+async def adm_setxp_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    target_id = int(query.data.split("_")[2])
+    ctx.user_data["adm_action"] = "set_xp"
+    ctx.user_data["adm_target_id"] = target_id
+    await query.edit_message_text(f"⚡ Kirim XP baru untuk user {target_id}:")
 
 @admin_only
 async def adm_setlevel_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
