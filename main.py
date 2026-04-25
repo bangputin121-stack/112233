@@ -43,6 +43,7 @@ from handlers.main_handlers import (
     items_callback, items_cmd,
     daily_callback, daily_cmd,
     help_callback, help_cmd, help_page_callback, fixme_cmd,
+    weeklyrank_callback, weeklyrank_cmd,
     noop_callback, locked_callback,
     gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
     redeem_prompt_callback, redeem_cmd,
@@ -109,6 +110,8 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("profile", profile_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("fixme", fixme_cmd))
+    app.add_handler(CommandHandler("weeklyrank", weeklyrank_cmd))
+    app.add_handler(CallbackQueryHandler(weeklyrank_callback, pattern="^weeklyrank$"))
     app.add_handler(CommandHandler("transfer", transfer_cmd))
     app.add_handler(CommandHandler("listitem", listitem_cmd))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
@@ -352,6 +355,33 @@ def main():
             logger.info(f"✅ Admin IDs: {admin_ids}")
         else:
             logger.warning("⚠️ No ADMIN_IDS set. Admin panel will be inaccessible.")
+
+        # ─── WEEKLY RANK SCHEDULER ────────────────────────────────────
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        import pytz
+
+        wib_tz = pytz.timezone("Asia/Jakarta")
+
+        async def weekly_rank_job():
+            """Auto-distribute weekly rank rewards every Monday 07:00 WIB."""
+            logger.info("🏆 Weekly Rank: distributing rewards...")
+            from game.engine import distribute_weekly_rewards
+            try:
+                summary = await distribute_weekly_rewards(bot=app.bot)
+                logger.info(f"🏆 Weekly Rank done: {summary[:200]}")
+            except Exception as e:
+                logger.error(f"🏆 Weekly Rank error: {e}")
+
+        scheduler = AsyncIOScheduler(timezone=wib_tz)
+        scheduler.add_job(
+            weekly_rank_job,
+            CronTrigger(day_of_week="mon", hour=7, minute=0, timezone=wib_tz),
+            id="weekly_rank_reset",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info("✅ Weekly Rank scheduler: every Monday 07:00 WIB")
 
     app = (
         Application.builder()
