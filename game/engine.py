@@ -1319,34 +1319,64 @@ async def fulfill_order(user_id: int, order_id: int) -> tuple[bool, str]:
 
 async def list_item_on_market(user_id: int, seller_name: str, item_key: str, qty: int, price: int) -> tuple[bool, str, int]:
     max_price = int(await get_setting("max_market_price", "9999999"))
-    max_listings = int(await get_setting("max_market_listings", "5"))
 
     if price > max_price:
         return False, f"💵 Harga maksimal Rp{max_price:,} per item.", 0
     if qty < 1 or price < 1:
         return False, "❌ Jumlah dan harga harus positif.", 0
 
-    async with get_db() as db:
-        count = await fetchone(db, 
-            "SELECT COUNT(*) as c FROM market_listings WHERE seller_id = ?", (user_id,)
-        )
-        if count["c"] >= max_listings:
-            return False, f"🏪 Kamu hanya bisa punya {max_listings} listing. Hapus salah satu dulu.", 0
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            # Cek daily listing limit (max 5 listing/hari, reset jam 07 WIB)
+            from database.db import set_setting
+            wib = timezone(timedelta(hours=7))
+            now_wib = datetime.now(wib)
+            daily_day = (now_wib - timedelta(hours=7)).date().isoformat()
 
-    ok, msg = await remove_from_inventory(user_id, item_key, qty)
-    if not ok:
-        return False, msg, 0
+            key_day = f"listing_day_{user_id}"
+            key_cnt = f"listing_cnt_{user_id}"
+            last_day = await get_setting(key_day, "")
+            if last_day == daily_day:
+                count = int(await get_setting(key_cnt, "0"))
+            else:
+                count = 0
 
-    async with get_db() as db:
-        cursor = await db.execute("""
-            INSERT INTO market_listings (seller_id, seller_name, item, qty, price)
-            VALUES (?, ?, ?, ?, ?)
-        """, (user_id, seller_name, item_key, qty, price))
-        listing_id = cursor.lastrowid
-        await db.commit()
+            if count >= 5:
+                next_reset = now_wib.replace(hour=7, minute=0, second=0, microsecond=0)
+                if now_wib >= next_reset:
+                    next_reset = next_reset + timedelta(days=1)
+                jam_lagi = int((next_reset - now_wib).total_seconds() // 3600)
+                return False, (
+                    f"🏪 LIMIT LISTING HARIAN HABIS!\n\n"
+                    f"Maks 5 listing/hari\n"
+                    f"Reset: jam 07:00 WIB ({jam_lagi} jam lagi)"
+                ), 0
+
+            # Cek listing aktif max 5 juga
+            active = await fetchone(db,
+                "SELECT COUNT(*) as c FROM market_listings WHERE seller_id = ?", (user_id,)
+            )
+            if active["c"] >= 5:
+                return False, f"🏪 Kamu sudah punya 5 listing aktif.\nHapus salah satu lewat 📢 Listing Saya.", 0
+
+            ok, msg = await _remove_from_inventory_raw(db, user_id, item_key, qty)
+            if not ok:
+                return False, msg, 0
+
+            cursor = await db.execute("""
+                INSERT INTO market_listings (seller_id, seller_name, item, qty, price)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, seller_name, item_key, qty, price))
+            listing_id = cursor.lastrowid
+
+            # Update daily counter
+            await set_setting(key_day, daily_day)
+            await set_setting(key_cnt, str(count + 1))
+            await db.commit()
 
     emoji = get_item_emoji(item_key)
-    return True, f"✅ Terdaftar {qty}x {emoji} {get_item_name(item_key)} @ Rp{price:,}/satuan.", listing_id
+    sisa = 5 - (count + 1)
+    return True, f"✅ Terdaftar {qty}x {emoji} {get_item_name(item_key)} @ Rp{price:,}/satuan.\n📊 Sisa listing hari ini: {sisa}/5", listing_id
 
 async def get_market_listings(page: int = 0, per_page: int = 9) -> list[dict]:
     async with get_db() as db:
@@ -1388,11 +1418,17 @@ async def buy_from_market(buyer_id: int, listing_id: int) -> tuple[bool, str]:
                 return False, msg
 
             await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (total_cost, buyer_id))
-            await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (total_cost, listing["seller_id"]))
+            # Fee 5% — penjual dapet 95%, 5% masuk kas sistem
+            fee = max(1, int(total_cost * 0.05))
+            seller_gets = total_cost - fee
+            await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (seller_gets, listing["seller_id"]))
             await db.commit()
 
             emoji = get_item_emoji(listing["item"])
-            return True, f"✅ Dibeli {listing['qty']}x {emoji} {get_item_name(listing['item'])} seharga Rp{total_cost:,}!"
+            return True, (
+                f"✅ Dibeli {listing['qty']}x {emoji} {get_item_name(listing['item'])} seharga Rp{total_cost:,}!\n"
+                f"💰 Penjual dapet: Rp{seller_gets:,} (fee 5%: Rp{fee:,})"
+            )
 
 async def remove_market_listing(user_id: int, listing_id: int) -> tuple[bool, str]:
     async with _get_user_lock(user_id):
