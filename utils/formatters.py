@@ -213,9 +213,12 @@ def fmt_market(listings: list[dict], page: int, total: int) -> str:
         emoji = get_item_emoji(listing["item"])
         name = get_item_name(listing["item"])
         total_price = listing["price"] * listing["qty"]
+        # Escape seller name dari chars yang rusak markdown
+        seller = str(listing.get("seller_name", "?")).replace("_", "\\_").replace("*", "")
         lines.append(f"{emoji} **{name}** x{listing['qty']}")
-        lines.append(f"  💵 Rp{listing['price']:,}/satuan (Total: Rp{total_price:,}) | 👤 {listing['seller_name']}")
+        lines.append(f"  💵 Rp{listing['price']:,}/unit | 👤 {seller}")
         lines.append("")
+    lines.append("💸 Fee 5% dipotong dari hasil jual")
     lines.append("Ketuk item untuk membelinya.")
     return "\n".join(lines)
 
