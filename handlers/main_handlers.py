@@ -1432,7 +1432,7 @@ async def market_list_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         row = await fetchone(db,
             "SELECT COUNT(*) as c FROM market_listings WHERE seller_id = ?", (user.id,))
         active_listings = row["c"] if row else 0
-    slot_tersisa = max_listings - active_listings
+    slot_tersisa = 5 - active_listings
 
     # Kuantitas contoh yang masuk akal
     qty_contoh = min(qty, 10) if qty >= 10 else qty
@@ -1468,7 +1468,9 @@ async def market_list_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lines += [
         f"📋 **Aturan Pasar**",
         f"  • Harga maks: Rp{max_price:,}/unit",
-        f"  • Slot listing: {active_listings}/{max_listings} _(sisa {slot_tersisa})_",
+        f"  • Slot listing: {active_listings}/5 _(sisa {5 - active_listings})_",
+        f"  • Listing harian: max 5/hari (reset 07:00 WIB)",
+        f"  • 💸 Fee 5% dipotong dari hasil jual",
         "",
     ]
 
