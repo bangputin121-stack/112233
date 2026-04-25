@@ -177,7 +177,10 @@ async def add_xp_and_check_level(user_id: int, xp_gain: int) -> tuple[int, bool,
         new_xp = old_xp + xp_gain
         new_level = get_level_from_xp(new_xp)
         leveled_up = new_level > old_level
-        await db.execute("UPDATE users SET xp = ?, level = ? WHERE user_id = ?", (new_xp, new_level, user_id))
+        await db.execute(
+            "UPDATE users SET xp = ?, level = ?, weekly_xp = weekly_xp + ? WHERE user_id = ?",
+            (new_xp, new_level, xp_gain, user_id)
+        )
         await db.commit()
         return new_level, leveled_up, new_xp
 
@@ -265,7 +268,9 @@ async def harvest_crop(user_id: int, slot: int) -> tuple[bool, str]:
             )
 
             bonus_drop = ""
-            bonus_rate = float(await get_setting("bonus_drop_rate", BONUS_DROP_RATE))
+            # Baca setting dari db connection yang sama (anti nested connection)
+            rate_row = await fetchone(db, "SELECT value FROM game_settings WHERE key = ?", ("bonus_drop_rate",))
+            bonus_rate = float(rate_row["value"]) if rate_row else float(BONUS_DROP_RATE)
             if random.random() < bonus_rate:
                 useful_tools = [
                     "nail", "screw", "wood_panel", "bolt", "plank", "duct_tape",
@@ -1257,6 +1262,10 @@ async def get_orders(user_id: int) -> list[dict]:
         return [dict(r) for r in rows]
 
 async def fulfill_order(user_id: int, order_id: int) -> tuple[bool, str]:
+    # Baca multiplier DI LUAR lock
+    double = await get_setting("double_coins", "0")
+    coin_mult, _ = await get_event_multipliers()
+
     async with _get_user_lock(user_id):
         async with get_db() as db:
             order = await fetchone(db,
@@ -1267,7 +1276,6 @@ async def fulfill_order(user_id: int, order_id: int) -> tuple[bool, str]:
             order = dict(order)
             items_needed = json.loads(order["items"])
 
-            # Check + remove all items atomically
             row = await fetchone(db, "SELECT silo_items, barn_items FROM users WHERE user_id = ?", (user_id,))
             silo = parse_json_field(row["silo_items"])
             barn = parse_json_field(row["barn_items"])
@@ -1284,12 +1292,8 @@ async def fulfill_order(user_id: int, order_id: int) -> tuple[bool, str]:
                     return False, msg
 
             coins = order["reward_coins"]
-            double = await get_setting("double_coins", "0")
             if double == "1":
                 coins *= 2
-
-            # Apply event coin multiplier
-            coin_mult, _ = await get_event_multipliers()
             if coin_mult > 1.0:
                 coins = int(coins * coin_mult)
 
@@ -1328,16 +1332,18 @@ async def list_item_on_market(user_id: int, seller_name: str, item_key: str, qty
     async with _get_user_lock(user_id):
         async with get_db() as db:
             # Cek daily listing limit (max 5 listing/hari, reset jam 07 WIB)
-            from database.db import set_setting
             wib = timezone(timedelta(hours=7))
             now_wib = datetime.now(wib)
             daily_day = (now_wib - timedelta(hours=7)).date().isoformat()
 
             key_day = f"listing_day_{user_id}"
             key_cnt = f"listing_cnt_{user_id}"
-            last_day = await get_setting(key_day, "")
+            # Baca setting DARI db connection yang sama (anti locked)
+            row_day = await fetchone(db, "SELECT value FROM game_settings WHERE key = ?", (key_day,))
+            last_day = row_day["value"] if row_day else ""
             if last_day == daily_day:
-                count = int(await get_setting(key_cnt, "0"))
+                row_cnt = await fetchone(db, "SELECT value FROM game_settings WHERE key = ?", (key_cnt,))
+                count = int(row_cnt["value"]) if row_cnt else 0
             else:
                 count = 0
 
@@ -1369,9 +1375,9 @@ async def list_item_on_market(user_id: int, seller_name: str, item_key: str, qty
             """, (user_id, seller_name, item_key, qty, price))
             listing_id = cursor.lastrowid
 
-            # Update daily counter
-            await set_setting(key_day, daily_day)
-            await set_setting(key_cnt, str(count + 1))
+            # Update daily counter DALAM db connection yang sama
+            await db.execute("INSERT OR REPLACE INTO game_settings (key, value) VALUES (?, ?)", (key_day, daily_day))
+            await db.execute("INSERT OR REPLACE INTO game_settings (key, value) VALUES (?, ?)", (key_cnt, str(count + 1)))
             await db.commit()
 
     emoji = get_item_emoji(item_key)
@@ -1684,50 +1690,46 @@ async def expand_animal_pens(user_id: int) -> tuple[bool, str]:
 # ─── SELL / DAILY ─────────────────────────────────────────────────────────────
 
 async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
-    # Security: tolak qty negatif/zero (anti-exploit)
     if not isinstance(qty, int) or qty <= 0:
         return False, "❌ Jumlah tidak valid."
     price = 0
     if item_key in CROPS:
         price = CROPS[item_key]["sell_price"]
     else:
-        # Cek produk hewan default (egg, milk, bacon, wool, dll)
         for a_key, a_val in ANIMALS.items():
             if a_val.get("product") == item_key:
                 price = a_val.get("sell_price", 0)
                 break
-        # Cek produk hewan custom (CUSTOM_ANIMAL_PRODUCTS dari /addanimal)
         if price == 0:
             from game.data import CUSTOM_ANIMAL_PRODUCTS
             if item_key in CUSTOM_ANIMAL_PRODUCTS:
                 price = CUSTOM_ANIMAL_PRODUCTS[item_key].get("sell_price", 0)
-        # Cek produk olahan pabrik
         if price == 0:
             for bld in BUILDINGS.values():
                 if item_key in bld["recipes"]:
                     price = bld["recipes"][item_key]["sell_price"]
                     break
-
     if price == 0:
         return False, "❌ Item ini tidak bisa dijual langsung."
 
-    ok, msg = await remove_from_inventory(user_id, item_key, qty)
-    if not ok:
-        return False, msg
-
-    total = price * qty
+    # Baca multiplier DI LUAR lock (anti nested connection)
     double = await get_setting("double_coins", "0")
-    if double == "1":
-        total *= 2
-
-    # Apply event multipliers (coin)
     coin_mult, _ = await get_event_multipliers()
-    if coin_mult > 1.0:
-        total = int(total * coin_mult)
 
-    async with get_db() as db:
-        await db.execute("UPDATE users SET coins = coins + ?, total_sales = total_sales + 1 WHERE user_id = ?", (total, user_id))
-        await db.commit()
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            ok, msg = await _remove_from_inventory_raw(db, user_id, item_key, qty)
+            if not ok:
+                return False, msg
+
+            total = price * qty
+            if double == "1":
+                total *= 2
+            if coin_mult > 1.0:
+                total = int(total * coin_mult)
+
+            await db.execute("UPDATE users SET coins = coins + ?, total_sales = total_sales + 1 WHERE user_id = ?", (total, user_id))
+            await db.commit()
 
     emoji = get_item_emoji(item_key)
     event_tag = f" 🎉 (event x{coin_mult})" if coin_mult > 1.0 else ""
@@ -1809,3 +1811,177 @@ async def get_user_full(user_id: int) -> dict | None:
         if row:
             return dict(row)
         return None
+
+
+# ─── WEEKLY RANK ─────────────────────────────────────────────────────────────
+
+# Hadiah per rank (Top 10) — coins, gems
+WEEKLY_REWARDS = {
+    1:  {"coins": 500000, "gems": 150, "medal": "🥇"},
+    2:  {"coins": 350000, "gems": 100, "medal": "🥈"},
+    3:  {"coins": 250000, "gems": 75,  "medal": "🥉"},
+    4:  {"coins": 175000, "gems": 50,  "medal": "4️⃣"},
+    5:  {"coins": 125000, "gems": 40,  "medal": "5️⃣"},
+    6:  {"coins": 100000, "gems": 30,  "medal": "6️⃣"},
+    7:  {"coins": 75000,  "gems": 20,  "medal": "7️⃣"},
+    8:  {"coins": 50000,  "gems": 15,  "medal": "8️⃣"},
+    9:  {"coins": 35000,  "gems": 10,  "medal": "9️⃣"},
+    10: {"coins": 25000,  "gems": 5,   "medal": "🔟"},
+}
+
+
+async def get_weekly_leaderboard(limit: int = 10) -> list[dict]:
+    """Ambil leaderboard weekly XP, top N players."""
+    async with get_db() as db:
+        rows = await fetchall(db,
+            "SELECT user_id, username, first_name, weekly_xp, level FROM users "
+            "WHERE weekly_xp > 0 ORDER BY weekly_xp DESC LIMIT ?",
+            (limit,)
+        )
+        return [dict(r) for r in rows]
+
+
+def fmt_weekly_leaderboard(entries: list[dict], user_id: int = None) -> str:
+    """Format leaderboard buat display."""
+    from database.db import get_display_name
+    if not entries:
+        return (
+            "🏆 **WEEKLY RANK**\n\n"
+            "Belum ada aktivitas minggu ini.\n"
+            "Mulai farming buat naik rank! 🌾"
+        )
+
+    # Hitung kapan reset (Senin depan jam 07:00 WIB)
+    wib = timezone(timedelta(hours=7))
+    now_wib = datetime.now(wib)
+    days_until_monday = (7 - now_wib.weekday()) % 7
+    if days_until_monday == 0 and now_wib.hour >= 7:
+        days_until_monday = 7
+    next_reset = (now_wib + timedelta(days=days_until_monday)).replace(
+        hour=7, minute=0, second=0, microsecond=0
+    )
+    delta = next_reset - now_wib
+    hours_left = int(delta.total_seconds() // 3600)
+    mins_left = int((delta.total_seconds() % 3600) // 60)
+
+    lines = [
+        "🏆 **WEEKLY RANK — Top 10**",
+        f"⏰ Reset: Senin 07:00 WIB ({hours_left}j {mins_left}m lagi)",
+        "",
+    ]
+
+    my_rank = None
+    for i, entry in enumerate(entries, 1):
+        reward = WEEKLY_REWARDS.get(i, {})
+        medal = reward.get("medal", f"#{i}")
+        name = get_display_name(entry)
+        xp = entry["weekly_xp"]
+        coins_r = reward.get("coins", 0)
+        gems_r = reward.get("gems", 0)
+
+        marker = " ⬅️" if entry["user_id"] == user_id else ""
+        lines.append(
+            f"{medal} **{name}** — {xp:,} XP"
+            f"  (💵{coins_r//1000}k 💎{gems_r})"
+            f"{marker}"
+        )
+        if entry["user_id"] == user_id:
+            my_rank = i
+
+    lines.append("")
+    if user_id and not my_rank:
+        lines.append("📊 Kamu belum masuk Top 10. Farming lebih banyak! 💪")
+    elif my_rank:
+        lines.append(f"📊 Rank kamu: #{my_rank}")
+
+    lines.append("\n💡 Dapat XP dari: panen, produksi, pesanan, daily")
+    return "\n".join(lines)
+
+
+async def distribute_weekly_rewards(bot=None) -> str:
+    """Distribusi hadiah ke Top 10, simpan history, reset weekly_xp.
+    Dipanggil otomatis tiap Senin jam 07:00 WIB oleh scheduler.
+    Return: summary text buat admin log."""
+    leaderboard = await get_weekly_leaderboard(10)
+
+    if not leaderboard:
+        # Reset aja walau kosong
+        async with get_db() as db:
+            await db.execute("UPDATE users SET weekly_xp = 0")
+            await db.commit()
+        return "📭 Tidak ada aktivitas minggu ini. Weekly XP di-reset."
+
+    # Label minggu (ISO week)
+    wib = timezone(timedelta(hours=7))
+    now_wib = datetime.now(wib)
+    week_label = f"{now_wib.year}-W{now_wib.isocalendar()[1]:02d}"
+
+    summary_lines = [f"🏆 **WEEKLY RANK RESULT — {week_label}**\n"]
+    notif_lines = [f"🏆 **HASIL WEEKLY RANK!**\n"]
+
+    from database.db import get_display_name
+
+    async with get_db() as db:
+        for i, entry in enumerate(leaderboard, 1):
+            reward = WEEKLY_REWARDS.get(i)
+            if not reward:
+                break
+
+            uid = entry["user_id"]
+            name = get_display_name(entry)
+            coins = reward["coins"]
+            gems = reward["gems"]
+            medal = reward["medal"]
+
+            # Give rewards
+            await db.execute(
+                "UPDATE users SET coins = coins + ?, gems = gems + ? WHERE user_id = ?",
+                (coins, gems, uid)
+            )
+            # Save history
+            await db.execute("""
+                INSERT INTO weekly_rank_history (week_label, user_id, rank, weekly_xp, reward_coins, reward_gems)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (week_label, uid, i, entry["weekly_xp"], coins, gems))
+
+            summary_lines.append(
+                f"{medal} {name} — {entry['weekly_xp']:,} XP → +Rp{coins:,} +{gems}💎"
+            )
+            notif_lines.append(
+                f"{medal} **{name}** — {entry['weekly_xp']:,} XP"
+            )
+
+            # DM notif ke pemenang
+            if bot:
+                try:
+                    await bot.send_message(
+                        uid,
+                        f"🏆 **SELAMAT! Weekly Rank #{i}!**\n\n"
+                        f"Kamu meraih peringkat {medal} **#{i}** minggu ini!\n"
+                        f"📊 Weekly XP: {entry['weekly_xp']:,}\n\n"
+                        f"🎁 **Hadiah:**\n"
+                        f"💵 +Rp{coins:,}\n"
+                        f"💎 +{gems} Gems\n\n"
+                        f"Pertahankan rank-mu minggu depan! 🌾",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+
+        # Reset ALL weekly_xp
+        await db.execute("UPDATE users SET weekly_xp = 0")
+        await db.commit()
+
+    # Broadcast leaderboard result ke semua player
+    if bot:
+        notif_lines.append(f"\n⏰ Weekly XP sudah di-reset.\nMulai farming lagi buat minggu depan! 🌾")
+        broadcast_text = "\n".join(notif_lines)
+        async with get_db() as db:
+            users = await fetchall(db, "SELECT user_id FROM users")
+        for u in users:
+            try:
+                await bot.send_message(u["user_id"], broadcast_text, parse_mode="Markdown")
+            except Exception:
+                pass
+
+    return "\n".join(summary_lines)
