@@ -2,6 +2,7 @@
 
 import json
 import random
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -17,6 +18,17 @@ from game.data import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ─── PER-USER LOCK ───────────────────────────────────────────────────────────
+# Fix race condition dari concurrent_updates=True.
+# Tanpa lock, 2 operasi inventory bisa baca JSON yang sama secara bersamaan,
+# lalu saling overwrite → item hilang, coins ilang, double listing, dll.
+_user_locks: dict[int, asyncio.Lock] = {}
+
+def _get_user_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _user_locks:
+        _user_locks[user_id] = asyncio.Lock()
+    return _user_locks[user_id]
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -64,77 +76,83 @@ def is_barn_item(item_key: str) -> bool:
 
 # ─── INVENTORY ───────────────────────────────────────────────────────────────
 
-async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[bool, str]:
-    # Security: tolak qty negatif/zero (anti-exploit)
+async def _add_to_inventory_raw(db, user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
+    """Internal: add item. HARUS dipanggil dalam async with _get_user_lock() + get_db()."""
     if not isinstance(qty, int) or qty <= 0:
         return False, "❌ Jumlah tidak valid."
-    async with get_db() as db:
-        row = await fetchone(db, "SELECT silo_items, barn_items, silo_cap, barn_cap FROM users WHERE user_id = ?", (user_id,))
-        silo = parse_json_field(row["silo_items"])
-        barn = parse_json_field(row["barn_items"])
-        silo_cap = row["silo_cap"]
-        barn_cap = row["barn_cap"]
+    row = await fetchone(db, "SELECT silo_items, barn_items, silo_cap, barn_cap FROM users WHERE user_id = ?", (user_id,))
+    silo = parse_json_field(row["silo_items"])
+    barn = parse_json_field(row["barn_items"])
 
-        if is_silo_item(item_key):
-            used = sum(silo.values())
-            if used + qty > silo_cap:
-                return False, (
-                    f"🌾 LUMBUNG PENUH!\n\n"
-                    f"Kapasitas: {used}/{silo_cap}\n"
-                    f"Mau masukin: {qty} item\n\n"
-                    f"💡 Jual hasil panen dulu\n"
-                    f"   atau Upgrade Lumbung!"
-                )
-            silo[item_key] = silo.get(item_key, 0) + qty
-            await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
-        elif is_barn_item(item_key):
-            used = sum(barn.values())
-            if used + qty > barn_cap:
-                return False, (
-                    f"🏚 GUDANG PENUH!\n\n"
-                    f"Kapasitas: {used}/{barn_cap}\n"
-                    f"Mau masukin: {qty} item\n\n"
-                    f"💡 Jual produk olahan dulu\n"
-                    f"   atau Upgrade Gudang!"
-                )
-            barn[item_key] = barn.get(item_key, 0) + qty
-            await db.execute("UPDATE users SET barn_items = ? WHERE user_id = ?", (dump_json_field(barn), user_id))
-        else:
-            return False, f"❓ Item tidak dikenal: {item_key}"
+    if is_silo_item(item_key):
+        used = sum(silo.values())
+        if used + qty > row["silo_cap"]:
+            return False, (
+                f"🌾 LUMBUNG PENUH!\n\nKapasitas: {used}/{row['silo_cap']}\n"
+                f"Mau masukin: {qty} item\n\n💡 Jual hasil panen dulu atau Upgrade Lumbung!"
+            )
+        silo[item_key] = silo.get(item_key, 0) + qty
+        await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
+    elif is_barn_item(item_key):
+        used = sum(barn.values())
+        if used + qty > row["barn_cap"]:
+            return False, (
+                f"🏚 GUDANG PENUH!\n\nKapasitas: {used}/{row['barn_cap']}\n"
+                f"Mau masukin: {qty} item\n\n💡 Jual produk olahan dulu atau Upgrade Gudang!"
+            )
+        barn[item_key] = barn.get(item_key, 0) + qty
+        await db.execute("UPDATE users SET barn_items = ? WHERE user_id = ?", (dump_json_field(barn), user_id))
+    else:
+        return False, f"❓ Item tidak dikenal: {item_key}"
+    return True, "ok"
 
-        await db.commit()
-        return True, "ok"
+
+async def _remove_from_inventory_raw(db, user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
+    """Internal: remove item. HARUS dipanggil dalam async with _get_user_lock() + get_db()."""
+    if not isinstance(qty, int) or qty <= 0:
+        return False, "❌ Jumlah tidak valid."
+    row = await fetchone(db, "SELECT silo_items, barn_items FROM users WHERE user_id = ?", (user_id,))
+    silo = parse_json_field(row["silo_items"])
+    barn = parse_json_field(row["barn_items"])
+
+    if is_silo_item(item_key):
+        have = silo.get(item_key, 0)
+        if have < qty:
+            return False, f"Kurang {get_item_name(item_key)} di lumbung (punya {have}, butuh {qty})"
+        silo[item_key] = have - qty
+        if silo[item_key] == 0:
+            del silo[item_key]
+        await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
+    elif is_barn_item(item_key):
+        have = barn.get(item_key, 0)
+        if have < qty:
+            return False, f"Kurang {get_item_name(item_key)} di gudang (punya {have}, butuh {qty})"
+        barn[item_key] = have - qty
+        if barn[item_key] == 0:
+            del barn[item_key]
+        await db.execute("UPDATE users SET barn_items = ? WHERE user_id = ?", (dump_json_field(barn), user_id))
+    else:
+        return False, f"Item tidak dikenal: {item_key}"
+    return True, "ok"
+
+
+async def add_to_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[bool, str]:
+    """Thread-safe: add item ke inventory player."""
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            result = await _add_to_inventory_raw(db, user_id, item_key, qty)
+            if result[0]:
+                await db.commit()
+            return result
 
 async def remove_from_inventory(user_id: int, item_key: str, qty: int = 1) -> tuple[bool, str]:
-    # Security: tolak qty negatif/zero (anti-exploit)
-    if not isinstance(qty, int) or qty <= 0:
-        return False, "❌ Jumlah tidak valid."
-    async with get_db() as db:
-        row = await fetchone(db, "SELECT silo_items, barn_items FROM users WHERE user_id = ?", (user_id,))
-        silo = parse_json_field(row["silo_items"])
-        barn = parse_json_field(row["barn_items"])
-
-        if is_silo_item(item_key):
-            have = silo.get(item_key, 0)
-            if have < qty:
-                return False, f"Kurang {get_item_name(item_key)} di lumbung (punya {have}, butuh {qty})"
-            silo[item_key] = have - qty
-            if silo[item_key] == 0:
-                del silo[item_key]
-            await db.execute("UPDATE users SET silo_items = ? WHERE user_id = ?", (dump_json_field(silo), user_id))
-        elif is_barn_item(item_key):
-            have = barn.get(item_key, 0)
-            if have < qty:
-                return False, f"Kurang {get_item_name(item_key)} di gudang (punya {have}, butuh {qty})"
-            barn[item_key] = have - qty
-            if barn[item_key] == 0:
-                del barn[item_key]
-            await db.execute("UPDATE users SET barn_items = ? WHERE user_id = ?", (dump_json_field(barn), user_id))
-        else:
-            return False, f"Item tidak dikenal: {item_key}"
-
-        await db.commit()
-        return True, "ok"
+    """Thread-safe: remove item dari inventory player."""
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            result = await _remove_from_inventory_raw(db, user_id, item_key, qty)
+            if result[0]:
+                await db.commit()
+            return result
 
 async def get_item_count(user_id: int, item_key: str) -> int:
     async with get_db() as db:
@@ -201,10 +219,14 @@ async def plant_crop(user_id: int, slot: int, crop_key: str) -> tuple[bool, str]
         now = utcnow()
         ready_at = now + timedelta(seconds=crop["grow_time"])
 
-        await db.execute(
-            "UPDATE plots SET crop=?, planted_at=?, ready_at=?, status='growing' WHERE user_id=? AND slot=?",
+        # Atomic: hanya update kalau plot MASIH empty (anti double-tap)
+        cursor = await db.execute(
+            "UPDATE plots SET crop=?, planted_at=?, ready_at=?, status='growing' WHERE user_id=? AND slot=? AND status='empty'",
             (crop_key, now.isoformat(), ready_at.isoformat(), user_id, slot)
         )
+        if cursor.rowcount == 0:
+            return False, "🌱 Lahan ini sudah ditanami (mungkin double-tap)."
+
         await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (seed_cost, user_id))
         await db.commit()
 
@@ -213,57 +235,52 @@ async def plant_crop(user_id: int, slot: int, crop_key: str) -> tuple[bool, str]
     return True, f"✅ Ditanam {crop['emoji']} {crop['name']}! Siap dalam {fmt_time(crop['grow_time'])}."
 
 async def harvest_crop(user_id: int, slot: int) -> tuple[bool, str]:
-    async with get_db() as db:
-        plot = await fetchone(db, 
-            "SELECT * FROM plots WHERE user_id = ? AND slot = ?", (user_id, slot)
-        )
-        if not plot or plot["status"] != "growing":
-            return False, "Tidak ada yang bisa dipanen di sini."
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            plot = await fetchone(db,
+                "SELECT * FROM plots WHERE user_id = ? AND slot = ?", (user_id, slot)
+            )
+            if not plot or plot["status"] != "growing":
+                return False, "Tidak ada yang bisa dipanen di sini."
 
-        ready_at = datetime.fromisoformat(plot["ready_at"])
-        if ready_at.tzinfo is None:
-            ready_at = ready_at.replace(tzinfo=timezone.utc)
-        now = utcnow()
+            ready_at = datetime.fromisoformat(plot["ready_at"])
+            if ready_at.tzinfo is None:
+                ready_at = ready_at.replace(tzinfo=timezone.utc)
+            now = utcnow()
 
-        if now < ready_at:
-            remaining = int((ready_at - now).total_seconds())
-            return False, f"⏳ {CROPS[plot['crop']]['emoji']} {CROPS[plot['crop']]['name']} belum siap! ({fmt_time(remaining)} lagi)"
+            if now < ready_at:
+                remaining = int((ready_at - now).total_seconds())
+                return False, f"⏳ {CROPS[plot['crop']]['emoji']} {CROPS[plot['crop']]['name']} belum siap! ({fmt_time(remaining)} lagi)"
 
-        crop_key = plot["crop"]
-        crop = CROPS[crop_key]
+            crop_key = plot["crop"]
+            crop = CROPS[crop_key]
 
-        ok, msg = await add_to_inventory(user_id, crop_key, 1)
-        if not ok:
-            return False, msg
+            ok, msg = await _add_to_inventory_raw(db, user_id, crop_key, 1)
+            if not ok:
+                return False, msg
 
-        await db.execute("UPDATE plots SET crop=NULL, planted_at=NULL, ready_at=NULL, status='empty' WHERE user_id=? AND slot=?",
-                         (user_id, slot))
+            await db.execute(
+                "UPDATE plots SET crop=NULL, planted_at=NULL, ready_at=NULL, status='empty' WHERE user_id=? AND slot=?",
+                (user_id, slot)
+            )
 
-        bonus_drop = ""
-        bonus_rate = float(await get_setting("bonus_drop_rate", BONUS_DROP_RATE))
-        if random.random() < bonus_rate:
-            # Cuma item yang BENERAN BERGUNA di game (16 item)
-            useful_tools = [
-                # Upgrade Lumbung (silo)
-                "nail", "screw", "wood_panel",
-                # Upgrade Gudang (barn)
-                "bolt", "plank", "duct_tape",
-                # Perluas lahan
-                "land_deed", "mallet", "marker_stake",
-                # Perluas kandang
-                "construction_permit",
-                # Bersihin rintangan
-                "axe", "saw", "dynamite", "tnt_barrel", "shovel", "rusty_hoe",
-            ]
-            bonus_item = random.choice(useful_tools)
-            ok2, _ = await add_to_inventory(user_id, bonus_item, 1)
-            if ok2:
-                b_emoji = get_item_emoji(bonus_item)
-                b_name = get_item_name(bonus_item)
-                bonus_drop = f"\n🎁 Bonus item: {b_emoji} {b_name}!"
+            bonus_drop = ""
+            bonus_rate = float(await get_setting("bonus_drop_rate", BONUS_DROP_RATE))
+            if random.random() < bonus_rate:
+                useful_tools = [
+                    "nail", "screw", "wood_panel", "bolt", "plank", "duct_tape",
+                    "land_deed", "mallet", "marker_stake", "construction_permit",
+                    "axe", "saw", "dynamite", "tnt_barrel", "shovel", "rusty_hoe",
+                ]
+                bonus_item = random.choice(useful_tools)
+                ok2, _ = await _add_to_inventory_raw(db, user_id, bonus_item, 1)
+                if ok2:
+                    b_emoji = get_item_emoji(bonus_item)
+                    b_name = get_item_name(bonus_item)
+                    bonus_drop = f"\n🎁 Bonus item: {b_emoji} {b_name}!"
 
-        await db.execute("UPDATE users SET total_harvests = total_harvests + 1 WHERE user_id = ?", (user_id,))
-        await db.commit()
+            await db.execute("UPDATE users SET total_harvests = total_harvests + 1 WHERE user_id = ?", (user_id,))
+            await db.commit()
 
     new_level, leveled_up, _ = await add_xp_and_check_level(user_id, crop["xp"])
     level_msg = f"\n🎉 Naik Level! Kamu sekarang Level {new_level}!" if leveled_up else ""
@@ -427,37 +444,38 @@ async def buy_animal(user_id: int, slot: int, animal_key: str) -> tuple[bool, st
         return True, f"✅ {animal['emoji']} {animal['name']} masuk! Produk pertama siap dalam {fmt_time(animal['feed_time'])}."
 
 async def collect_animal(user_id: int, slot: int) -> tuple[bool, str]:
-    async with get_db() as db:
-        pen = await fetchone(db, "SELECT * FROM animal_pens WHERE user_id = ? AND slot = ?", (user_id, slot))
-        if not pen or pen["status"] == "empty":
-            return False, "Tidak ada hewan di sini."
-        if pen["status"] != "producing":
-            return False, "Hewan belum siap."
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            pen = await fetchone(db, "SELECT * FROM animal_pens WHERE user_id = ? AND slot = ?", (user_id, slot))
+            if not pen or pen["status"] == "empty":
+                return False, "Tidak ada hewan di sini."
+            if pen["status"] != "producing":
+                return False, "Hewan belum siap."
 
-        ready_at = datetime.fromisoformat(pen["ready_at"])
-        if ready_at.tzinfo is None:
-            ready_at = ready_at.replace(tzinfo=timezone.utc)
-        now = utcnow()
+            ready_at = datetime.fromisoformat(pen["ready_at"])
+            if ready_at.tzinfo is None:
+                ready_at = ready_at.replace(tzinfo=timezone.utc)
+            now = utcnow()
 
-        if now < ready_at:
-            remaining = int((ready_at - now).total_seconds())
-            animal = ANIMALS[pen["animal"]]
-            return False, f"⏳ {animal['emoji']} {animal['name']} butuh {fmt_time(remaining)} lagi."
+            if now < ready_at:
+                remaining = int((ready_at - now).total_seconds())
+                animal = ANIMALS[pen["animal"]]
+                return False, f"⏳ {animal['emoji']} {animal['name']} butuh {fmt_time(remaining)} lagi."
 
-        animal_key = pen["animal"]
-        animal = ANIMALS[animal_key]
-        product = animal["product"]
+            animal_key = pen["animal"]
+            animal = ANIMALS[animal_key]
+            product = animal["product"]
 
-        ok, msg = await add_to_inventory(user_id, product, 1)
-        if not ok:
-            return False, msg
+            ok, msg = await _add_to_inventory_raw(db, user_id, product, 1)
+            if not ok:
+                return False, msg
 
-        next_ready = now + timedelta(seconds=animal["feed_time"])
-        await db.execute(
-            "UPDATE animal_pens SET fed_at=?, ready_at=?, status='producing' WHERE user_id=? AND slot=?",
-            (now.isoformat(), next_ready.isoformat(), user_id, slot)
-        )
-        await db.commit()
+            next_ready = now + timedelta(seconds=animal["feed_time"])
+            await db.execute(
+                "UPDATE animal_pens SET fed_at=?, ready_at=?, status='producing' WHERE user_id=? AND slot=?",
+                (now.isoformat(), next_ready.isoformat(), user_id, slot)
+            )
+            await db.commit()
 
     new_level, leveled_up, _ = await add_xp_and_check_level(user_id, 3)
     level_msg = f"\n🎉 Naik Level! Kamu sekarang Level {new_level}!" if leveled_up else ""
@@ -926,73 +944,92 @@ async def start_production(user_id: int, building_key: str, recipe_key: str) -> 
         return False, "❓ Resep tidak dikenal."
     recipe = bld["recipes"][recipe_key]
 
-    async with get_db() as db:
-        slots = await fetchall(db, 
-            "SELECT * FROM buildings WHERE user_id = ? AND building = ? ORDER BY slot", (user_id, building_key)
-        )
-        slots = [dict(s) for s in slots]
-        if not slots:
-            return False, f"🏭 Kamu tidak punya {bld['name']}. Beli dulu!"
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            slots = await fetchall(db,
+                "SELECT * FROM buildings WHERE user_id = ? AND building = ? ORDER BY slot", (user_id, building_key)
+            )
+            slots = [dict(s) for s in slots]
+            if not slots:
+                return False, f"🏭 Kamu tidak punya {bld['name']}. Beli dulu!"
 
-        free_slot = next((s for s in slots if s["status"] == "idle"), None)
-        if not free_slot:
-            return False, f"⚙️ Semua {bld['name']} slot sedang sibuk!"
+            free_slot = next((s for s in slots if s["status"] == "idle"), None)
+            if not free_slot:
+                return False, f"⚙️ Semua {bld['name']} slot sedang sibuk!"
 
-        # Check and consume ingredients
-        for ing, qty in recipe["inputs"].items():
-            count = await get_item_count(user_id, ing)
-            if count < qty:
-                ing_emoji = get_item_emoji(ing)
-                return False, f"❌ Butuh {qty}x {ing_emoji} {get_item_name(ing)} (you have {count})."
+            # Check ingredients
+            row = await fetchone(db, "SELECT silo_items, barn_items FROM users WHERE user_id = ?", (user_id,))
+            silo = parse_json_field(row["silo_items"])
+            barn = parse_json_field(row["barn_items"])
+            for ing, qty in recipe["inputs"].items():
+                have = silo.get(ing, 0) + barn.get(ing, 0)
+                if have < qty:
+                    ing_emoji = get_item_emoji(ing)
+                    return False, f"❌ Butuh {qty}x {ing_emoji} {get_item_name(ing)} (punya {have})."
 
-        for ing, qty in recipe["inputs"].items():
-            await remove_from_inventory(user_id, ing, qty)
+            # Consume ingredients
+            for ing, qty in recipe["inputs"].items():
+                ok, msg = await _remove_from_inventory_raw(db, user_id, ing, qty)
+                if not ok:
+                    return False, msg
 
-        now = utcnow()
-        # Apply cooldown reduction dari level pabrik
-        bld_level = await get_building_level(user_id, building_key)
-        actual_time = _apply_cooldown_reduction(recipe["time"], bld_level)
-        ready_at = now + timedelta(seconds=actual_time)
-        await db.execute("""
-            UPDATE buildings SET item=?, started_at=?, ready_at=?, status='producing'
-            WHERE user_id=? AND building=? AND slot=?
-        """, (recipe_key, now.isoformat(), ready_at.isoformat(), user_id, building_key, free_slot["slot"]))
-        await db.commit()
+            now = utcnow()
+            bld_level = await get_building_level(user_id, building_key)
+            actual_time = _apply_cooldown_reduction(recipe["time"], bld_level)
+            ready_at = now + timedelta(seconds=actual_time)
+            await db.execute("""
+                UPDATE buildings SET item=?, started_at=?, ready_at=?, status='producing'
+                WHERE user_id=? AND building=? AND slot=?
+            """, (recipe_key, now.isoformat(), ready_at.isoformat(), user_id, building_key, free_slot["slot"]))
+            await db.commit()
 
-        out_emoji = PROCESSED_EMOJI.get(recipe_key, "📦")
-        level_hint = f" (Lv{bld_level})" if bld_level > 1 else ""
-        return True, f"✅ {out_emoji} {get_item_name(recipe_key)} production started!{level_hint} Siap dalam {fmt_time(actual_time)}."
+            out_emoji = PROCESSED_EMOJI.get(recipe_key, "📦")
+            level_hint = f" (Lv{bld_level})" if bld_level > 1 else ""
+            return True, f"✅ {out_emoji} {get_item_name(recipe_key)} mulai diproduksi!{level_hint} Siap dalam {fmt_time(actual_time)}."
 
 async def collect_production(user_id: int, building_key: str, slot: int) -> tuple[bool, str]:
-    async with get_db() as db:
-        bld_slot = await fetchone(db, 
-            "SELECT * FROM buildings WHERE user_id=? AND building=? AND slot=?", (user_id, building_key, slot)
-        )
-        if not bld_slot:
-            return False, "❓ Slot bangunan tidak ditemukan."
-        bld_slot = dict(bld_slot)
-        if bld_slot["status"] != "producing":
-            return False, "Tidak ada yang bisa diambil di sini."
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            bld_slot = await fetchone(db,
+                "SELECT * FROM buildings WHERE user_id=? AND building=? AND slot=?", (user_id, building_key, slot)
+            )
+            if not bld_slot:
+                return False, "❓ Slot bangunan tidak ditemukan."
+            bld_slot = dict(bld_slot)
+            if bld_slot["status"] != "producing":
+                return False, "Tidak ada yang bisa diambil di sini."
 
-        ready_at = datetime.fromisoformat(bld_slot["ready_at"])
-        if ready_at.tzinfo is None:
-            ready_at = ready_at.replace(tzinfo=timezone.utc)
-        if utcnow() < ready_at:
-            remaining = int((ready_at - utcnow()).total_seconds())
-            item_emoji = PROCESSED_EMOJI.get(bld_slot["item"], "📦")
-            return False, f"⏳ {item_emoji} {get_item_name(bld_slot['item'])} siap dalam {fmt_time(remaining)}."
+            ready_at = datetime.fromisoformat(bld_slot["ready_at"])
+            if ready_at.tzinfo is None:
+                ready_at = ready_at.replace(tzinfo=timezone.utc)
+            if utcnow() < ready_at:
+                remaining = int((ready_at - utcnow()).total_seconds())
+                item_emoji = PROCESSED_EMOJI.get(bld_slot["item"], "📦")
+                return False, f"⏳ {item_emoji} {get_item_name(bld_slot['item'])} siap dalam {fmt_time(remaining)}."
 
-        recipe_key = bld_slot["item"]
-        bld = BUILDINGS[building_key]
-        recipe = bld["recipes"].get(recipe_key, {})
+            recipe_key = bld_slot["item"]
+            bld = BUILDINGS[building_key]
+            recipe = bld["recipes"].get(recipe_key, {})
 
-        ok, msg = await add_to_inventory(user_id, recipe_key, 1)
-        if not ok:
-            return False, msg
+            # Atomic: clear slot + add item dalam 1 lock
+            cursor = await db.execute(
+                "UPDATE buildings SET item=NULL, started_at=NULL, ready_at=NULL, status='idle' WHERE user_id=? AND building=? AND slot=? AND status='producing'",
+                (user_id, building_key, slot)
+            )
+            if cursor.rowcount == 0:
+                return False, "⏳ Sudah diambil."
 
-        await db.execute("UPDATE buildings SET item=NULL, started_at=NULL, ready_at=NULL, status='idle' WHERE user_id=? AND building=? AND slot=?",
-                         (user_id, building_key, slot))
-        await db.commit()
+            ok, msg = await _add_to_inventory_raw(db, user_id, recipe_key, 1)
+            if not ok:
+                # Rollback slot
+                await db.execute(
+                    "UPDATE buildings SET item=?, started_at=?, ready_at=?, status='producing' WHERE user_id=? AND building=? AND slot=?",
+                    (recipe_key, bld_slot["started_at"], bld_slot["ready_at"], user_id, building_key, slot)
+                )
+                await db.commit()
+                return False, msg
+
+            await db.commit()
 
     new_level, leveled_up, _ = await add_xp_and_check_level(user_id, recipe.get("xp", 5))
     level_msg = f"\n🎉 Naik Level! Kamu sekarang Level {new_level}!" if leveled_up else ""
@@ -1220,37 +1257,47 @@ async def get_orders(user_id: int) -> list[dict]:
         return [dict(r) for r in rows]
 
 async def fulfill_order(user_id: int, order_id: int) -> tuple[bool, str]:
-    async with get_db() as db:
-        order = await fetchone(db, 
-            "SELECT * FROM orders WHERE id = ? AND user_id = ? AND status = 'active'", (order_id, user_id)
-        )
-        if not order:
-            return False, "❌ Pesanan tidak ditemukan."
-        order = dict(order)
-        items_needed = json.loads(order["items"])
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            order = await fetchone(db,
+                "SELECT * FROM orders WHERE id = ? AND user_id = ? AND status = 'active'", (order_id, user_id)
+            )
+            if not order:
+                return False, "❌ Pesanan tidak ditemukan."
+            order = dict(order)
+            items_needed = json.loads(order["items"])
 
-        # Check all items available
-        for item_key, qty in items_needed.items():
-            have = await get_item_count(user_id, item_key)
-            if have < qty:
-                emoji = get_item_emoji(item_key)
-                return False, f"❌ Butuh {qty}x {emoji} {get_item_name(item_key)} (punya {have})."
+            # Check + remove all items atomically
+            row = await fetchone(db, "SELECT silo_items, barn_items FROM users WHERE user_id = ?", (user_id,))
+            silo = parse_json_field(row["silo_items"])
+            barn = parse_json_field(row["barn_items"])
 
-        # Remove items
-        for item_key, qty in items_needed.items():
-            await remove_from_inventory(user_id, item_key, qty)
+            for item_key, qty in items_needed.items():
+                have = silo.get(item_key, 0) + barn.get(item_key, 0)
+                if have < qty:
+                    emoji = get_item_emoji(item_key)
+                    return False, f"❌ Butuh {qty}x {emoji} {get_item_name(item_key)} (punya {have})."
 
-        # Give rewards
-        coins = order["reward_coins"]
-        double = await get_setting("double_coins", "0")
-        if double == "1":
-            coins *= 2
+            for item_key, qty in items_needed.items():
+                ok, msg = await _remove_from_inventory_raw(db, user_id, item_key, qty)
+                if not ok:
+                    return False, msg
 
-        await db.execute("UPDATE users SET coins = coins + ?, total_sales = total_sales + 1 WHERE user_id = ?", (coins, user_id))
-        await db.execute("UPDATE orders SET status = 'completed' WHERE id = ?", (order_id,))
-        await db.commit()
+            coins = order["reward_coins"]
+            double = await get_setting("double_coins", "0")
+            if double == "1":
+                coins *= 2
 
-    # Generate replacement — delete old completed order first to avoid UNIQUE conflict
+            # Apply event coin multiplier
+            coin_mult, _ = await get_event_multipliers()
+            if coin_mult > 1.0:
+                coins = int(coins * coin_mult)
+
+            await db.execute("UPDATE users SET coins = coins + ?, total_sales = total_sales + 1 WHERE user_id = ?", (coins, user_id))
+            await db.execute("UPDATE orders SET status = 'completed' WHERE id = ?", (order_id,))
+            await db.commit()
+
+    # Generate replacement
     user_row = await get_user_full(user_id)
     new_order = _generate_order(user_row["level"])
     async with get_db() as db:
@@ -1264,7 +1311,8 @@ async def fulfill_order(user_id: int, order_id: int) -> tuple[bool, str]:
 
     new_level, leveled_up, _ = await add_xp_and_check_level(user_id, order["reward_xp"])
     level_msg = f"\n🎉 Naik Level! Kamu sekarang Level {new_level}!" if leveled_up else ""
-    return True, f"✅ Pesanan selesai! +Rp{coins:,} +{order['reward_xp']} XP{level_msg}"
+    event_tag = f" 🎉 (event x{coin_mult})" if coin_mult > 1.0 else ""
+    return True, f"✅ Pesanan selesai! +Rp{coins:,} +{order['reward_xp']} XP{event_tag}{level_msg}"
 
 
 # ─── MARKET ──────────────────────────────────────────────────────────────────
@@ -1309,48 +1357,70 @@ async def get_market_listings(page: int = 0, per_page: int = 9) -> list[dict]:
         return [dict(r) for r in rows]
 
 async def buy_from_market(buyer_id: int, listing_id: int) -> tuple[bool, str]:
-    async with get_db() as db:
-        listing = await fetchone(db, "SELECT * FROM market_listings WHERE id = ?", (listing_id,))
-        if not listing:
-            return False, "❌ Listing tidak ditemukan."
-        listing = dict(listing)
+    async with _get_user_lock(buyer_id):
+        async with get_db() as db:
+            listing = await fetchone(db, "SELECT * FROM market_listings WHERE id = ?", (listing_id,))
+            if not listing:
+                return False, "❌ Listing tidak ditemukan atau sudah dibeli."
+            listing = dict(listing)
 
-        if listing["seller_id"] == buyer_id:
-            return False, "❌ You can't buy your own listing!"
+            if listing["seller_id"] == buyer_id:
+                return False, "❌ Tidak bisa beli listing sendiri!"
 
-        buyer = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (buyer_id,)))
-        total_cost = listing["price"] * listing["qty"]
-        if buyer["coins"] < total_cost:
-            return False, f"💵 Kurang uang! Butuh Rp{total_cost:,} (punya Rp{buyer['coins']:,})."
+            buyer = dict(await fetchone(db, "SELECT * FROM users WHERE user_id = ?", (buyer_id,)))
+            total_cost = listing["price"] * listing["qty"]
+            if buyer["coins"] < total_cost:
+                return False, f"💵 Kurang uang! Butuh Rp{total_cost:,} (punya Rp{buyer['coins']:,})."
 
-        ok, msg = await add_to_inventory(buyer_id, listing["item"], listing["qty"])
-        if not ok:
-            return False, msg
+            # ATOMIC: Hapus listing DULU (claim), baru add item
+            await db.execute("DELETE FROM market_listings WHERE id = ?", (listing_id,))
 
-        await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (total_cost, buyer_id))
-        await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (total_cost, listing["seller_id"]))
-        await db.execute("DELETE FROM market_listings WHERE id = ?", (listing_id,))
-        await db.commit()
+            ok, msg = await _add_to_inventory_raw(db, buyer_id, listing["item"], listing["qty"])
+            if not ok:
+                # Gagal add — restore listing
+                await db.execute("""
+                    INSERT INTO market_listings (id, seller_id, seller_name, item, qty, price, channel_msg_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (listing_id, listing["seller_id"], listing["seller_name"],
+                      listing["item"], listing["qty"], listing["price"],
+                      listing.get("channel_msg_id")))
+                await db.commit()
+                return False, msg
 
-        emoji = get_item_emoji(listing["item"])
-        return True, f"✅ Dibeli {listing['qty']}x {emoji} {get_item_name(listing['item'])} seharga Rp{total_cost:,}!"
+            await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (total_cost, buyer_id))
+            await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (total_cost, listing["seller_id"]))
+            await db.commit()
+
+            emoji = get_item_emoji(listing["item"])
+            return True, f"✅ Dibeli {listing['qty']}x {emoji} {get_item_name(listing['item'])} seharga Rp{total_cost:,}!"
 
 async def remove_market_listing(user_id: int, listing_id: int) -> tuple[bool, str]:
-    async with get_db() as db:
-        listing = await fetchone(db, 
-            "SELECT * FROM market_listings WHERE id = ? AND seller_id = ?", (listing_id, user_id)
-        )
-        if not listing:
-            return False, "❌ Listing tidak ditemukan."
-        listing = dict(listing)
+    async with _get_user_lock(user_id):
+        async with get_db() as db:
+            listing = await fetchone(db,
+                "SELECT * FROM market_listings WHERE id = ? AND seller_id = ?", (listing_id, user_id)
+            )
+            if not listing:
+                return False, "❌ Listing tidak ditemukan."
+            listing = dict(listing)
 
-        ok, msg = await add_to_inventory(user_id, listing["item"], listing["qty"])
-        if not ok:
-            return False, f"❌ Gagal mengembalikan item: {msg}"
+            # Delete first, then add back to inventory
+            await db.execute("DELETE FROM market_listings WHERE id = ?", (listing_id,))
 
-        await db.execute("DELETE FROM market_listings WHERE id = ?", (listing_id,))
-        await db.commit()
-        return True, f"✅ Listing removed. Items returned to your storage."
+            ok, msg = await _add_to_inventory_raw(db, user_id, listing["item"], listing["qty"])
+            if not ok:
+                # Restore listing
+                await db.execute("""
+                    INSERT INTO market_listings (id, seller_id, seller_name, item, qty, price, channel_msg_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (listing_id, user_id, listing["seller_name"],
+                      listing["item"], listing["qty"], listing["price"],
+                      listing.get("channel_msg_id")))
+                await db.commit()
+                return False, f"❌ Gagal mengembalikan item: {msg}"
+
+            await db.commit()
+            return True, f"✅ Listing dihapus. Item dikembalikan ke penyimpanan."
 
 
 # ─── LAND CLEARING ───────────────────────────────────────────────────────────
@@ -1671,7 +1741,6 @@ async def claim_daily(user_id: int) -> tuple[bool, str]:
 
 async def buy_tool(user_id: int, tool_key: str, qty: int = 1) -> tuple[bool, str]:
     from game.data import TOOL_SHOP
-    # Security: tolak qty negatif/zero (anti-exploit)
     if not isinstance(qty, int) or qty <= 0:
         return False, "❌ Jumlah tidak valid."
     if tool_key not in TOOL_SHOP:
@@ -1679,21 +1748,18 @@ async def buy_tool(user_id: int, tool_key: str, qty: int = 1) -> tuple[bool, str
     tool = TOOL_SHOP[tool_key]
     total_price = tool["price"] * qty
 
-    async with get_db() as db:
-        user = dict(await fetchone(db, "SELECT coins FROM users WHERE user_id = ?", (user_id,)))
-        if user["coins"] < total_price:
-            return False, f"💵 Kurang uang! Butuh Rp{total_price:,} (punya Rp{user['coins']:,})."
-
-        await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (total_price, user_id))
-        await db.commit()
-
-    ok, msg = await add_to_inventory(user_id, tool_key, qty)
-    if not ok:
-        # Refund
+    async with _get_user_lock(user_id):
         async with get_db() as db:
-            await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (total_price, user_id))
+            user = dict(await fetchone(db, "SELECT coins FROM users WHERE user_id = ?", (user_id,)))
+            if user["coins"] < total_price:
+                return False, f"💵 Kurang uang! Butuh Rp{total_price:,} (punya Rp{user['coins']:,})."
+
+            ok, msg = await _add_to_inventory_raw(db, user_id, tool_key, qty)
+            if not ok:
+                return False, msg
+
+            await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (total_price, user_id))
             await db.commit()
-        return False, msg
 
     emoji = get_item_emoji(tool_key)
     return True, f"✅ Dibeli {qty}x {emoji} {tool['name']} seharga Rp{total_price:,}!"
