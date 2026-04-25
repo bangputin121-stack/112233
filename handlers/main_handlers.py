@@ -105,6 +105,20 @@ async def safe_edit(query, text: str, keyboard=None, parse_mode=ParseMode.MARKDO
             except Exception:
                 pass
         logger.error(f"safe_edit failed: {e}")
+        # FALLBACK: coba lagi TANPA markdown — biar pesan tetep muncul
+        if parse_mode is not None:
+            try:
+                if has_media:
+                    await query.edit_message_caption(
+                        caption=text, reply_markup=keyboard, parse_mode=None
+                    )
+                else:
+                    await query.edit_message_text(
+                        text, reply_markup=keyboard, parse_mode=None,
+                        disable_web_page_preview=True
+                    )
+            except Exception:
+                pass
 
 async def safe_send(update: Update, text: str, keyboard=None):
     try:
@@ -113,7 +127,15 @@ async def safe_send(update: Update, text: str, keyboard=None):
             disable_web_page_preview=True
         )
     except Exception as e:
-        logger.error(f"safe_send failed: {e}")
+        logger.error(f"safe_send markdown failed: {e}")
+        # Retry tanpa markdown
+        try:
+            await update.message.reply_text(
+                text, reply_markup=keyboard, parse_mode=None,
+                disable_web_page_preview=True
+            )
+        except Exception as e2:
+            logger.error(f"safe_send fallback also failed: {e2}")
 
 async def get_item_photo(item_key: str):
     """Get media (GIF priority, then photo) for an item.
@@ -1936,6 +1958,31 @@ async def fixme_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Coba ketik /start buat mulai lagi.\n"
         "Kalau masih stuck, hubungi admin."
     ), back_to_menu())
+
+
+# ─── WEEKLY RANK ────────────────────────────────────────────────────────────
+
+async def weeklyrank_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    from game.engine import get_weekly_leaderboard, fmt_weekly_leaderboard
+    entries = await get_weekly_leaderboard(10)
+    text = fmt_weekly_leaderboard(entries, user.id)
+    await safe_edit(query, text, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="weeklyrank")],
+        [InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")],
+    ]))
+
+async def weeklyrank_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    from game.engine import get_weekly_leaderboard, fmt_weekly_leaderboard
+    entries = await get_weekly_leaderboard(10)
+    text = fmt_weekly_leaderboard(entries, user.id)
+    await safe_send(update, text, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="weeklyrank")],
+        [InlineKeyboardButton("🏠 Menu Utama", callback_data="menu")],
+    ]))
 
 
 # ─── SET LANGUAGE ────────────────────────────────────────────────────────────
