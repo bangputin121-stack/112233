@@ -42,7 +42,7 @@ from handlers.main_handlers import (
     tutorial_callback, tutorial_cmd,
     items_callback, items_cmd,
     daily_callback, daily_cmd,
-    help_callback, help_cmd, help_page_callback,
+    help_callback, help_cmd, help_page_callback, fixme_cmd,
     noop_callback, locked_callback,
     gemshop_callback, gemshop_cmd, gembuy_callback, gemconfirm_callback,
     redeem_prompt_callback, redeem_cmd,
@@ -108,6 +108,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("daily", daily_cmd))
     app.add_handler(CommandHandler("profile", profile_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("fixme", fixme_cmd))
     app.add_handler(CommandHandler("transfer", transfer_cmd))
     app.add_handler(CommandHandler("listitem", listitem_cmd))
     app.add_handler(CommandHandler("leaderboard", leaderboard_cmd))
