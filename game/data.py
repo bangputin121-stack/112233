@@ -174,7 +174,7 @@ TOOL_SHOP = {
     "shovel":        {"price": 25000,  "emoji": "🪚", "name": "Shovel",       "category": "Pembersih"},
     "rusty_hoe":     {"price": 15000,  "emoji": "⚒️",  "name": "Rusty Hoe",    "category": "Pembersih"},
     # Pupuk & Pestisida
-    "pesticide":     {"price": 10000,  "emoji": "🧴", "name": "Pestisida",    "category": "Pertanian"},
+    "pesticide":     {"price": 5000,  "emoji": "🧴", "name": "Pestisida",    "category": "Pertanian"},
     "fertilizer":    {"price": 10000,  "emoji": "🧪", "name": "Pupuk Biasa (30%)",  "category": "Pertanian"},
     "super_fertilizer": {"price": 22000, "emoji": "⚗️", "name": "Pupuk Super (50%)", "category": "Pertanian"},
     # Doping hewan (sistem mirip pupuk tapi buat hewan)
