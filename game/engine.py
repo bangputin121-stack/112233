@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+
 import aiosqlite
 
 from database.db import get_db, fetchone, fetchall, parse_json_field, dump_json_field, get_setting
@@ -337,7 +338,7 @@ async def spray_pesticide(user_id: int, slot: int) -> tuple[bool, str]:
     """Spray pesticide on infected plot. Cures pest, plant regrows at 50% original time."""
     have = await get_item_count(user_id, "pesticide")
     if have < 1:
-        return False, "❌ Kamu tidak punya 🧴 Pestisida!\nBeli di 🛒 **Toko Alat** (Rp10,000)."
+        return False, "❌ Kamu tidak punya 🧴 Pestisida!\nBeli di 🛒 **Toko Alat** (Rp5,000)."
 
     async with get_db() as db:
         plot = await fetchone(db,
