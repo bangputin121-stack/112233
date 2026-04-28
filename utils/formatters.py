@@ -214,7 +214,8 @@ def fmt_market(listings: list[dict], page: int, total: int) -> str:
         name = get_item_name(listing["item"])
         total_price = listing["price"] * listing["qty"]
         lines.append(f"{emoji} **{name}** x{listing['qty']}")
-        lines.append(f"  💵 Rp{listing['price']:,}/satuan (Total: Rp{total_price:,}) | 👤 {listing['seller_name']}")
+        seller = str(listing.get("seller_name", "?")).replace("_", "\\_")
+        lines.append(f"  💵 Rp{listing['price']:,}/unit | 👤 {seller}")
         lines.append("")
     lines.append("Ketuk item untuk membelinya.")
     return "\n".join(lines)
