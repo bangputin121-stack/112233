@@ -1,4 +1,4 @@
-# game/data.py - Master game data for Harvest Kingdom
+# game/data.py - Master game data for greena farm
 
 CROPS = {
     "wheat":      {"name": "Wheat",      "emoji": "🌾", "grow_time": 120,    "sell_price": 500,   "xp": 1,  "level_req": 1,  "seed_cost": 500},
