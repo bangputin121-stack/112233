@@ -2597,3 +2597,20 @@ async def listevents_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+# ─── ADMIN: WEEKLY RANK ──────────────────────────────────────────────────────
+
+@admin_only
+async def weeklyreward_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Manual trigger weekly rank: distribute rewards + reset XP."""
+    await update.message.reply_text("⏳ Distributing weekly rank rewards...")
+    from game.engine import distribute_weekly_rewards
+    try:
+        summary = await distribute_weekly_rewards(bot=ctx.bot)
+        await update.message.reply_text(
+            f"✅ Weekly Rank selesai!\n\n{summary[:3500]}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
