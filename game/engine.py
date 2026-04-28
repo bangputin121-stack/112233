@@ -1843,16 +1843,16 @@ async def get_user_full(user_id: int) -> dict | None:
 
 # Hadiah per rank (Top 10) — coins, gems
 WEEKLY_REWARDS = {
-    1:  {"coins": 500000, "gems": 150, "medal": "🥇"},
-    2:  {"coins": 350000, "gems": 100, "medal": "🥈"},
-    3:  {"coins": 250000, "gems": 75,  "medal": "🥉"},
-    4:  {"coins": 175000, "gems": 50,  "medal": "4️⃣"},
-    5:  {"coins": 125000, "gems": 40,  "medal": "5️⃣"},
-    6:  {"coins": 100000, "gems": 30,  "medal": "6️⃣"},
-    7:  {"coins": 75000,  "gems": 20,  "medal": "7️⃣"},
-    8:  {"coins": 50000,  "gems": 15,  "medal": "8️⃣"},
-    9:  {"coins": 35000,  "gems": 10,  "medal": "9️⃣"},
-    10: {"coins": 25000,  "gems": 5,   "medal": "🔟"},
+    1:  {"coins": 1000000, "gems": 300, "medal": "🥇"},
+    2:  {"coins": 500000, "gems": 200, "medal": "🥈"},
+    3:  {"coins": 300000, "gems": 150,  "medal": "🥉"},
+    4:  {"coins": 200000, "gems": 100,  "medal": "4️⃣"},
+    5:  {"coins": 200000, "gems": 100,  "medal": "5️⃣"},
+    6:  {"coins": 200000, "gems": 100,  "medal": "6️⃣"},
+    7:  {"coins": 200000,  "gems": 100,  "medal": "7️⃣"},
+    8:  {"coins": 200000,  "gems": 100,  "medal": "8️⃣"},
+    9:  {"coins": 200000,  "gems": 100,  "medal": "9️⃣"},
+    10: {"coins": 200000,  "gems": 100,   "medal": "🔟"},
 }
 
 
