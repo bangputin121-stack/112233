@@ -72,6 +72,7 @@ from handlers.admin_handlers import (
     resetuser_cmd, resetall_cmd,
     addorder_cmd, addorderall_cmd,
     addslot_cmd,
+    weeklyreward_cmd,
     event_cmd, stopevent_cmd, listevents_cmd,
 )
 
@@ -162,9 +163,7 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("addorder", addorder_cmd))
     app.add_handler(CommandHandler("addorderall", addorderall_cmd))
     app.add_handler(CommandHandler("addslot", addslot_cmd))
-    app.add_handler(CommandHandler("event", event_cmd))
-    app.add_handler(CommandHandler("stopevent", stopevent_cmd))
-    app.add_handler(CommandHandler("listevents", listevents_cmd))
+    app.add_handler(CommandHandler("weeklyreward", weeklyreward_cmd))
     app.add_handler(CommandHandler("event", event_cmd))
     app.add_handler(CommandHandler("stopevent", stopevent_cmd))
     app.add_handler(CommandHandler("listevents", listevents_cmd))
