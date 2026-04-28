@@ -1119,6 +1119,21 @@ async def sell_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 if item_key in bld["recipes"]:
                     sell_price = bld["recipes"][item_key]["sell_price"]
                     break
+        # Cek tool/alat — jual 50% harga beli
+        if sell_price == 0:
+            from game.data import TOOL_SHOP
+            if item_key in TOOL_SHOP:
+                sell_price = TOOL_SHOP[item_key]["price"] // 2
+        # Tool drop-only
+        if sell_price == 0:
+            DROP_ONLY_SELL = {
+                "paint": 5000, "brick": 5000, "cement": 7000, "sledgehammer": 8000,
+                "map_piece": 6000, "compass": 7000, "mayors_signature": 10000,
+                "wire_cutter": 5000, "notary_letter": 8000, "city_plan": 10000,
+                "crowbar": 6000, "pest_spray": 4000, "trash_cart": 7000, "mini_tractor": 12000,
+            }
+            if item_key in DROP_ONLY_SELL:
+                sell_price = DROP_ONLY_SELL[item_key]
 
     price_line = ""
     if sell_price:
