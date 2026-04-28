@@ -1344,39 +1344,12 @@ async def list_item_on_market(user_id: int, seller_name: str, item_key: str, qty
 
     async with _get_user_lock(user_id):
         async with get_db() as db:
-            # Cek daily listing limit (max 5 listing/hari, reset jam 07 WIB)
-            wib = timezone(timedelta(hours=7))
-            now_wib = datetime.now(wib)
-            daily_day = (now_wib - timedelta(hours=7)).date().isoformat()
-
-            key_day = f"listing_day_{user_id}"
-            key_cnt = f"listing_cnt_{user_id}"
-            # Baca setting DARI db connection yang sama (anti locked)
-            row_day = await fetchone(db, "SELECT value FROM game_settings WHERE key = ?", (key_day,))
-            last_day = row_day["value"] if row_day else ""
-            if last_day == daily_day:
-                row_cnt = await fetchone(db, "SELECT value FROM game_settings WHERE key = ?", (key_cnt,))
-                count = int(row_cnt["value"]) if row_cnt else 0
-            else:
-                count = 0
-
-            if count >= 5:
-                next_reset = now_wib.replace(hour=7, minute=0, second=0, microsecond=0)
-                if now_wib >= next_reset:
-                    next_reset = next_reset + timedelta(days=1)
-                jam_lagi = int((next_reset - now_wib).total_seconds() // 3600)
-                return False, (
-                    f"🏪 LIMIT LISTING HARIAN HABIS!\n\n"
-                    f"Maks 5 listing/hari\n"
-                    f"Reset: jam 07:00 WIB ({jam_lagi} jam lagi)"
-                ), 0
-
-            # Cek listing aktif max 5 juga
+            # Cek max 5 listing aktif
             active = await fetchone(db,
                 "SELECT COUNT(*) as c FROM market_listings WHERE seller_id = ?", (user_id,)
             )
             if active["c"] >= 5:
-                return False, f"🏪 Kamu sudah punya 5 listing aktif.\nHapus salah satu lewat 📢 Listing Saya.", 0
+                return False, "🏪 Kamu sudah punya 5 listing aktif.\nHapus salah satu lewat 📢 Listing Saya.", 0
 
             ok, msg = await _remove_from_inventory_raw(db, user_id, item_key, qty)
             if not ok:
@@ -1387,15 +1360,10 @@ async def list_item_on_market(user_id: int, seller_name: str, item_key: str, qty
                 VALUES (?, ?, ?, ?, ?)
             """, (user_id, seller_name, item_key, qty, price))
             listing_id = cursor.lastrowid
-
-            # Update daily counter DALAM db connection yang sama
-            await db.execute("INSERT OR REPLACE INTO game_settings (key, value) VALUES (?, ?)", (key_day, daily_day))
-            await db.execute("INSERT OR REPLACE INTO game_settings (key, value) VALUES (?, ?)", (key_cnt, str(count + 1)))
             await db.commit()
 
     emoji = get_item_emoji(item_key)
-    sisa = 5 - (count + 1)
-    return True, f"✅ Terdaftar {qty}x {emoji} {get_item_name(item_key)} @ Rp{price:,}/satuan.\n📊 Sisa listing hari ini: {sisa}/5", listing_id
+    return True, f"✅ Terdaftar {qty}x {emoji} {get_item_name(item_key)} @ Rp{price:,}/satuan.", listing_id
 
 async def get_market_listings(page: int = 0, per_page: int = 9) -> list[dict]:
     async with get_db() as db:
@@ -1404,6 +1372,19 @@ async def get_market_listings(page: int = 0, per_page: int = 9) -> list[dict]:
             (per_page, page * per_page)
         )
         return [dict(r) for r in rows]
+
+def _get_base_sell_price(item_key: str) -> int:
+    """Get base sell price for fee calculation."""
+    if item_key in CROPS:
+        return CROPS[item_key].get("sell_price", 0)
+    for a in ANIMALS.values():
+        if a.get("product") == item_key:
+            return a.get("sell_price", 0)
+    for b in BUILDINGS.values():
+        if item_key in b["recipes"]:
+            return b["recipes"][item_key].get("sell_price", 0)
+    return 0
+
 
 async def buy_from_market(buyer_id: int, listing_id: int) -> tuple[bool, str]:
     async with _get_user_lock(buyer_id):
@@ -1437,16 +1418,29 @@ async def buy_from_market(buyer_id: int, listing_id: int) -> tuple[bool, str]:
                 return False, msg
 
             await db.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (total_cost, buyer_id))
-            # Fee 5% — penjual dapet 95%, 5% masuk kas sistem
-            fee = max(1, int(total_cost * 0.05))
+
+            # Fee structure: <1x base=10%, 1x-2x=free, 3x+=15%
+            base_price = _get_base_sell_price(listing["item"])
+            fee_pct = 0.10  # default
+            if base_price > 0:
+                ratio = listing["price"] / base_price
+                if ratio >= 1 and ratio <= 2:
+                    fee_pct = 0.0
+                elif ratio >= 3:
+                    fee_pct = 0.15
+                else:
+                    fee_pct = 0.10
+            fee = int(total_cost * fee_pct)
             seller_gets = total_cost - fee
+
             await db.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (seller_gets, listing["seller_id"]))
             await db.commit()
 
             emoji = get_item_emoji(listing["item"])
+            fee_text = f"\n💸 Fee {int(fee_pct*100)}%: Rp{fee:,}" if fee > 0 else "\n🆓 Free fee!"
             return True, (
-                f"✅ Dibeli {listing['qty']}x {emoji} {get_item_name(listing['item'])} seharga Rp{total_cost:,}!\n"
-                f"💰 Penjual dapet: Rp{seller_gets:,} (fee 5%: Rp{fee:,})"
+                f"✅ Dibeli {listing['qty']}x {emoji} {get_item_name(listing['item'])} seharga Rp{total_cost:,}!"
+                f"{fee_text}"
             )
 
 async def remove_market_listing(user_id: int, listing_id: int) -> tuple[bool, str]:
@@ -1706,6 +1700,7 @@ async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
     if not isinstance(qty, int) or qty <= 0:
         return False, "❌ Jumlah tidak valid."
     price = 0
+    is_tool = False
     if item_key in CROPS:
         price = CROPS[item_key]["sell_price"]
     else:
@@ -1722,6 +1717,23 @@ async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
                 if item_key in bld["recipes"]:
                     price = bld["recipes"][item_key]["sell_price"]
                     break
+        # Tool/alat bisa dijual ke NPC — harga 50% dari harga beli
+        if price == 0:
+            from game.data import TOOL_SHOP
+            if item_key in TOOL_SHOP:
+                price = TOOL_SHOP[item_key]["price"] // 2
+                is_tool = True
+        # Tool drop-only (nggak ada di toko) — kasih harga jual default
+        if price == 0:
+            DROP_ONLY_SELL = {
+                "paint": 5000, "brick": 5000, "cement": 7000, "sledgehammer": 8000,
+                "map_piece": 6000, "compass": 7000, "mayors_signature": 10000,
+                "wire_cutter": 5000, "notary_letter": 8000, "city_plan": 10000,
+                "crowbar": 6000, "pest_spray": 4000, "trash_cart": 7000, "mini_tractor": 12000,
+            }
+            if item_key in DROP_ONLY_SELL:
+                price = DROP_ONLY_SELL[item_key]
+                is_tool = True
     if price == 0:
         return False, "❌ Item ini tidak bisa dijual langsung."
 
@@ -1746,7 +1758,8 @@ async def sell_item(user_id: int, item_key: str, qty: int) -> tuple[bool, str]:
 
     emoji = get_item_emoji(item_key)
     event_tag = f" 🎉 (event x{coin_mult})" if coin_mult > 1.0 else ""
-    return True, f"✅ Terjual {qty}x {emoji} {get_item_name(item_key)} seharga Rp{total:,}!{event_tag}"
+    tool_tag = " _(50% harga beli)_" if is_tool else ""
+    return True, f"✅ Terjual {qty}x {emoji} {get_item_name(item_key)} seharga Rp{total:,}!{tool_tag}{event_tag}"
 
 async def claim_daily(user_id: int) -> tuple[bool, str]:
     """Daily reset di jam 07:00 WIB (UTC+7).
