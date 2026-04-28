@@ -135,6 +135,16 @@ async def init_db():
             await db.execute("ALTER TABLE market_listings ADD COLUMN channel_msg_id INTEGER")
         except Exception:
             pass
+        # Migration: weekly_xp for weekly rank
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN weekly_xp INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        # Weekly rank history
+        await db.execute("""CREATE TABLE IF NOT EXISTS weekly_rank_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, week_label TEXT, user_id INTEGER,
+            rank INTEGER, weekly_xp INTEGER DEFAULT 0, reward_coins INTEGER DEFAULT 0,
+            reward_gems INTEGER DEFAULT 0, awarded_at TEXT DEFAULT (datetime('now')))""")
         await db.commit()
         logger.info("Database initialized successfully")
 
